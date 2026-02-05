@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Bell, EllipsisVertical, LogOut, UserCircle } from 'lucide-vue-next'
+import { authClient } from '@/lib/auth-client'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -24,11 +26,24 @@ interface User {
   avatar: string
 }
 
-defineProps<{
+const props = defineProps<{
   user: User
 }>()
 
 const { isMobile } = useSidebar()
+
+const initials = computed(() => {
+  const words = props.user.name.trim().split(/\s+/)
+  return words
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('')
+})
+
+async function handleLogout() {
+  await authClient.signOut()
+  window.location.href = '/login'
+}
 </script>
 
 <template>
@@ -42,7 +57,9 @@ const { isMobile } = useSidebar()
           >
             <Avatar class="h-8 w-8 rounded-lg grayscale">
               <AvatarImage :src="user.avatar" :alt="user.name" />
-              <AvatarFallback class="rounded-lg"> MM </AvatarFallback>
+              <AvatarFallback class="rounded-lg">
+                {{ initials }}
+              </AvatarFallback>
             </Avatar>
             <div class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-medium">{{ user.name }}</span>
@@ -63,7 +80,9 @@ const { isMobile } = useSidebar()
             <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
               <Avatar class="h-8 w-8 rounded-lg">
                 <AvatarImage :src="user.avatar" :alt="user.name" />
-                <AvatarFallback class="rounded-lg"> MM </AvatarFallback>
+                <AvatarFallback class="rounded-lg">
+                  {{ initials }}
+                </AvatarFallback>
               </Avatar>
               <div class="grid flex-1 text-left text-sm leading-tight">
                 <span class="truncate font-medium">{{ user.name }}</span>
@@ -85,7 +104,7 @@ const { isMobile } = useSidebar()
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          <DropdownMenuItem @click="handleLogout">
             <LogOut />
             Abmelden
           </DropdownMenuItem>

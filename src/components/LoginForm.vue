@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
+import { ref } from 'vue'
 import { Fingerprint } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
+import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -17,6 +19,48 @@ import { Separator } from '@/components/ui/separator'
 const props = defineProps<{
   class?: HTMLAttributes['class']
 }>()
+
+const email = ref('')
+const password = ref('')
+const error = ref('')
+const loading = ref(false)
+
+async function handleSubmit() {
+  error.value = ''
+  loading.value = true
+  try {
+    const { error: signInError } = await authClient.signIn.email({
+      email: email.value,
+      password: password.value,
+    })
+    if (signInError) {
+      error.value = signInError.message ?? 'Anmeldung fehlgeschlagen.'
+      return
+    }
+    window.location.href = '/'
+  } catch {
+    error.value = 'Anmeldung fehlgeschlagen.'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handlePasskeySignIn() {
+  error.value = ''
+  loading.value = true
+  try {
+    const { error: passkeyError } = await authClient.signIn.passkey()
+    if (passkeyError) {
+      error.value = passkeyError.message ?? 'Passkey-Anmeldung fehlgeschlagen.'
+      return
+    }
+    window.location.href = '/'
+  } catch {
+    error.value = 'Passkey-Anmeldung fehlgeschlagen.'
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -27,12 +71,16 @@ const props = defineProps<{
         <CardDescription> Melden Sie sich mit Ihrem Konto an </CardDescription>
       </CardHeader>
       <CardContent>
-        <form>
+        <p v-if="error" class="text-destructive mb-4 text-sm">
+          {{ error }}
+        </p>
+        <form @submit.prevent="handleSubmit">
           <FieldGroup>
             <Field>
               <FieldLabel for="email"> E-Mail </FieldLabel>
               <Input
                 id="email"
+                v-model="email"
                 type="email"
                 placeholder="name@beispiel.de"
                 required
@@ -48,10 +96,17 @@ const props = defineProps<{
                   Passwort vergessen?
                 </a>
               </div>
-              <Input id="password" type="password" required />
+              <Input
+                id="password"
+                v-model="password"
+                type="password"
+                required
+              />
             </Field>
             <Field>
-              <Button type="submit" class="w-full"> Anmelden </Button>
+              <Button type="submit" class="w-full" :disabled="loading">
+                Anmelden
+              </Button>
             </Field>
           </FieldGroup>
         </form>
@@ -63,7 +118,13 @@ const props = defineProps<{
             oder
           </span>
         </div>
-        <Button variant="outline" type="button" class="w-full">
+        <Button
+          variant="outline"
+          type="button"
+          class="w-full"
+          :disabled="loading"
+          @click="handlePasskeySignIn"
+        >
           <Fingerprint class="mr-2 size-4" />
           Mit Passkey anmelden
         </Button>

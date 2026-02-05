@@ -4,6 +4,7 @@ import { admin } from 'better-auth/plugins'
 import { passkey } from '@better-auth/passkey'
 import { db } from '@/db'
 import * as schema from '@/db/schema'
+import { sendPasswordResetEmail } from '@/lib/email'
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -12,6 +13,9 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendPasswordResetEmail(user, url)
+    },
   },
   trustedOrigins: [process.env.BETTER_AUTH_URL!],
   plugins: [
