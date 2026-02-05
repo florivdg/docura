@@ -1,5 +1,14 @@
 import nodemailer from 'nodemailer'
 
+function escapeHtml(str: string): string {
+  return str
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
@@ -58,7 +67,7 @@ export async function sendPasswordResetEmail(
                 <!-- Greeting + explanation -->
                 <tr>
                   <td style="padding:0 0 24px 0;font-size:15px;line-height:24px;color:#3f3f46;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-                    Hallo ${user.name},<br /><br />
+                    Hallo ${escapeHtml(user.name)},<br /><br />
                     du hast eine Anfrage zum Zurücksetzen deines Passworts gestellt. Klicke auf den folgenden Button, um ein neues Passwort zu vergeben:
                   </td>
                 </tr>
