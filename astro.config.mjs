@@ -13,6 +13,8 @@ export default defineConfig({
     mode: 'standalone',
   }),
 
+  output: 'server',
+
   vite: {
     plugins: [tailwindcss()],
   },

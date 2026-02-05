@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Docura is a German-language shared document management system built with Astro 5, Vue 3, and Better Auth. It uses SQLite with Drizzle ORM and features passkey (WebAuthn) authentication support. All authenticated users share a single document library and can upload, organize, search, and preview documents.
+Docura is a German-language shared document management system built with Astro 5, Vue 3, and Better Auth. It uses PostgreSQL (via Bun SQL) with Drizzle ORM and features passkey (WebAuthn) authentication support. All authenticated users share a single document library and can upload, organize, search, and preview documents.
 
 ## Commands
 
@@ -30,7 +30,7 @@ bun run astro check        # Astro project check
 - **Astro 5** - SSR framework with Node adapter (standalone mode)
 - **Vue 3** - Interactive components with `<script setup>`
 - **Better Auth** - Authentication with passkey support
-- **Drizzle ORM** - SQLite database with WAL mode
+- **Drizzle ORM** - PostgreSQL database via `bun:sql` driver
 - **Tailwind CSS 4** - CSS-first syntax with `@theme` blocks
 - **Reka UI** - Headless component primitives (shadcn-vue style)
 
@@ -39,7 +39,7 @@ bun run astro check        # Astro project check
 - `src/pages/` - Astro file-based routing (SSR)
 - `src/components/ui/` - shadcn-vue style UI components
 - `src/components/documents/` - Document management Vue components
-- `src/db/schema/` - Drizzle schema definitions (documents, folders, tags)
+- `src/db/schema/` - Drizzle schema definitions (auth tables, documents, folders, tags)
 - `src/lib/` - Auth configuration and utilities
 - `scripts/` - CLI scripts (migrations, user management)
 - `uploads/` - Document file storage (not in git)
@@ -69,7 +69,7 @@ Core entities:
 
 ### Document Storage
 
-- Files stored on disk, metadata in SQLite
+- Files stored on disk, metadata in PostgreSQL
 - Path structure: `{UPLOAD_DIR}/{uuid}.{ext}`
 - UUID filenames to avoid collisions; original name kept in DB
 - Configurable max file size and supported types (PDF, PNG, JPG, etc.)
@@ -78,7 +78,7 @@ Core entities:
 
 Required in `.env` (see `.env.example`):
 
-- `DB_FILE_NAME` - SQLite database path
+- `DATABASE_URL` - PostgreSQL connection string
 - `BETTER_AUTH_SECRET` - 32-byte base64 secret
 - `BETTER_AUTH_URL` - Auth callback URL
 - `PASSKEY_RP_ID` - WebAuthn relying party ID
