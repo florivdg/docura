@@ -113,10 +113,10 @@ const navSecondary = [
         <SidebarMenuItem>
           <SidebarMenuButton
             as-child
-            class="data-[slot=sidebar-menu-button]:!p-1.5"
+            class="data-[slot=sidebar-menu-button]:p-1.5!"
           >
             <a href="#">
-              <HardDrive class="!size-5" />
+              <HardDrive class="size-5!" />
               <span class="text-base font-semibold">Docura</span>
             </a>
           </SidebarMenuButton>
