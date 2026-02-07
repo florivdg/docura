@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18-alpine
+    image: pgvector/pgvector:pg18
     container_name: docura-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-docura}
@@ -9,7 +9,8 @@ services:
     ports:
       - '5432:5432'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
+      - ./docker/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
     healthcheck:
       test:
         [
