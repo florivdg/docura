@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { Fingerprint } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import { authClient } from '@/lib/auth-client'
@@ -45,6 +45,15 @@ async function handleSubmit() {
   }
 }
 
+onMounted(() => {
+  authClient.signIn
+    .passkey({ autoFill: true })
+    .then(({ error: err }) => {
+      if (!err) window.location.href = '/'
+    })
+    .catch(() => {})
+})
+
 async function handlePasskeySignIn() {
   error.value = ''
   loading.value = true
@@ -83,6 +92,7 @@ async function handlePasskeySignIn() {
                 v-model="email"
                 type="email"
                 placeholder="name@beispiel.de"
+                autocomplete="username webauthn"
                 required
               />
             </Field>

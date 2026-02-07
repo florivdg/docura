@@ -94,7 +94,7 @@ async function handleLogout() {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <DropdownMenuItem>
+            <DropdownMenuItem as="a" href="/account">
               <UserCircle />
               Konto
             </DropdownMenuItem>

@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+
+withDefaults(
+  defineProps<{
+    title?: string
+  }>(),
+  {
+    title: 'Übersicht',
+  },
+)
 </script>
 
 <template>
@@ -13,7 +22,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
         orientation="vertical"
         class="mx-2 data-[orientation=vertical]:h-4"
       />
-      <h1 class="text-base font-medium">Übersicht</h1>
+      <h1 class="text-base font-medium">{{ title }}</h1>
     </div>
   </header>
 </template>
