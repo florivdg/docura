@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import {
   FileText,
   FolderOpen,
@@ -29,27 +29,26 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
 
-const userData = ref({
-  name: '',
-  email: '',
-  avatar: '',
+const session = authClient.useSession()
+
+const userData = computed(() => {
+  const user = session.value.data?.user
+  return {
+    name: user?.name ?? '',
+    email: user?.email ?? '',
+    avatar: user?.image ?? '',
+  }
 })
 
-onMounted(async () => {
-  const { data } = await authClient.getSession()
-  if (data?.user) {
-    userData.value = {
-      name: data.user.name,
-      email: data.user.email,
-      avatar: data.user.image ?? '',
-    }
-  }
+const currentPath = computed(() => {
+  if (typeof window === 'undefined') return '/'
+  return window.location.pathname || '/'
 })
 
 const navMain = [
   {
     title: 'Übersicht',
-    url: '#',
+    url: '/',
     icon: LayoutDashboard,
   },
   {
@@ -90,7 +89,7 @@ const navDocuments = [
 const navSecondary = [
   {
     title: 'Einstellungen',
-    url: '#',
+    url: '/account',
     icon: Settings,
   },
   {
@@ -115,7 +114,7 @@ const navSecondary = [
             as-child
             class="data-[slot=sidebar-menu-button]:p-1.5!"
           >
-            <a href="#">
+            <a href="/">
               <HardDrive class="size-5!" />
               <span class="text-base font-semibold">Docura</span>
             </a>
@@ -124,9 +123,13 @@ const navSecondary = [
       </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>
-      <NavMain :items="navMain" />
+      <NavMain :items="navMain" :current-path="currentPath" />
       <NavDocuments :items="navDocuments" />
-      <NavSecondary :items="navSecondary" class="mt-auto" />
+      <NavSecondary
+        :items="navSecondary"
+        :current-path="currentPath"
+        class="mt-auto"
+      />
     </SidebarContent>
     <SidebarFooter>
       <NavUser :user="userData" />

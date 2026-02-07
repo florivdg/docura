@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
 import { CirclePlus, FileUp } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
@@ -10,15 +9,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { type NavItem, isNavItemActive } from '@/lib/nav'
 
-interface NavItem {
-  title: string
-  url: string
-  icon?: Component
-}
-
-defineProps<{
+const props = defineProps<{
   items: NavItem[]
+  currentPath: string
 }>()
 </script>
 
@@ -46,9 +41,15 @@ defineProps<{
       </SidebarMenu>
       <SidebarMenu>
         <SidebarMenuItem v-for="item in items" :key="item.title">
-          <SidebarMenuButton :tooltip="item.title">
-            <component :is="item.icon" v-if="item.icon" />
-            <span>{{ item.title }}</span>
+          <SidebarMenuButton
+            as-child
+            :tooltip="item.title"
+            :is-active="isNavItemActive(item, props.currentPath)"
+          >
+            <a :href="item.url">
+              <component :is="item.icon" v-if="item.icon" />
+              <span>{{ item.title }}</span>
+            </a>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

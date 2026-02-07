@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
-
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -8,15 +6,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { type NavItem, isNavItemActive } from '@/lib/nav'
 
-interface NavItem {
-  title: string
-  url: string
-  icon?: Component
-}
-
-defineProps<{
+const props = defineProps<{
   items: NavItem[]
+  currentPath: string
 }>()
 </script>
 
@@ -25,7 +19,10 @@ defineProps<{
     <SidebarGroupContent>
       <SidebarMenu>
         <SidebarMenuItem v-for="item in items" :key="item.title">
-          <SidebarMenuButton as-child>
+          <SidebarMenuButton
+            as-child
+            :is-active="isNavItemActive(item, props.currentPath)"
+          >
             <a :href="item.url">
               <component :is="item.icon" v-if="item.icon" />
               {{ item.title }}
