@@ -17,6 +17,12 @@ export const onRequest = defineMiddleware(async (context, next) => {
   })
 
   if (!session) {
+    if (pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({ error: 'Nicht authentifiziert' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
     return context.redirect('/login')
   }
 
