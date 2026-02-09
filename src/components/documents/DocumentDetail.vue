@@ -13,8 +13,19 @@ import {
   CircleAlert,
   Plus,
   X,
+  ScanText,
+  ChevronsUpDown,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-vue-next'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,6 +55,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import TagDialog from '@/components/tags/TagDialog.vue'
@@ -77,6 +101,7 @@ interface DocumentData {
   fileSize: number
   createdAt: string
   updatedAt: string
+  textContent: string | null
   folder: DocumentFolder | null
   tags: DocumentTag[]
   processingJobs: ProcessingJobData[]
@@ -97,10 +122,16 @@ const loading = ref(true)
 const notFound = ref(false)
 const error = ref(false)
 const deleting = ref(false)
+const textContentOpen = ref(false)
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
 
 const allFolders = ref<FolderOption[]>([])
 const allTags = ref<DocumentTag[]>([])
 const tagDialogOpen = ref(false)
+const fullscreenZoomed = ref(false)
 
 const statusConfig: Record<
   string,
@@ -308,7 +339,9 @@ onMounted(async () => {
       </div>
     </div>
     <div class="grid gap-4 md:grid-cols-[1fr_360px] md:gap-6">
-      <Skeleton class="h-[500px] rounded-lg" />
+      <div class="flex flex-col gap-4 md:gap-6">
+        <Skeleton class="h-[500px] rounded-lg" />
+      </div>
       <div class="flex flex-col gap-4 md:gap-6">
         <Skeleton class="h-56 rounded-lg" />
         <Skeleton class="h-40 rounded-lg" />
@@ -399,26 +432,134 @@ onMounted(async () => {
 
     <!-- Content -->
     <div class="grid gap-4 md:grid-cols-[1fr_360px] md:gap-6">
-      <!-- Preview -->
-      <div
-        class="bg-muted/50 flex items-center justify-center overflow-hidden rounded-lg border"
-      >
-        <img
-          v-if="isImage(doc.mimeType)"
-          :src="`/api/documents/${doc.id}/file`"
-          :alt="doc.name"
-          class="max-h-[600px] w-full object-contain p-4"
-        />
-        <iframe
-          v-else-if="isPdf(doc.mimeType)"
-          :src="`/api/documents/${doc.id}/file`"
-          :title="doc.name"
-          class="h-[600px] w-full"
-        />
-        <div v-else class="flex flex-col items-center gap-3 py-20">
-          <FileText class="text-muted-foreground size-16" />
-          <p class="text-muted-foreground text-sm">Vorschau nicht verfügbar</p>
+      <!-- Left column: Preview + OCR text -->
+      <div class="flex flex-col gap-4 md:gap-6">
+        <!-- Preview -->
+        <div
+          class="bg-muted/50 relative flex items-center justify-center overflow-hidden rounded-lg border"
+        >
+          <img
+            v-if="isImage(doc.mimeType)"
+            :src="`/api/documents/${doc.id}/file`"
+            :alt="doc.name"
+            class="max-h-[600px] w-full object-contain p-4"
+          />
+          <iframe
+            v-else-if="isPdf(doc.mimeType)"
+            :src="`/api/documents/${doc.id}/file`"
+            :title="doc.name"
+            class="h-[600px] w-full"
+          />
+          <div v-else class="flex flex-col items-center gap-3 py-20">
+            <FileText class="text-muted-foreground size-16" />
+            <p class="text-muted-foreground text-sm">
+              Vorschau nicht verfügbar
+            </p>
+          </div>
+
+          <!-- Fullscreen preview dialog -->
+          <Dialog v-if="isImage(doc.mimeType) || isPdf(doc.mimeType)">
+            <DialogTrigger as-child>
+              <Button
+                variant="secondary"
+                size="icon"
+                class="absolute top-2 right-2 size-8"
+              >
+                <Maximize2 class="size-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent
+              class="flex h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0 sm:max-w-[calc(100vw-2rem)]"
+            >
+              <DialogHeader
+                class="flex-row items-center justify-between p-4 pr-14 pb-0"
+              >
+                <div>
+                  <DialogTitle class="truncate pr-8">{{
+                    doc.name
+                  }}</DialogTitle>
+                  <DialogDescription class="sr-only"
+                    >Dokumentenvorschau</DialogDescription
+                  >
+                </div>
+                <Button
+                  v-if="isImage(doc.mimeType)"
+                  variant="ghost"
+                  size="icon"
+                  class="size-8 shrink-0"
+                  @click="fullscreenZoomed = !fullscreenZoomed"
+                >
+                  <ZoomOut v-if="fullscreenZoomed" class="size-4" />
+                  <ZoomIn v-else class="size-4" />
+                </Button>
+              </DialogHeader>
+              <div
+                :class="[
+                  'min-h-0 flex-1 p-4',
+                  fullscreenZoomed && isImage(doc.mimeType)
+                    ? 'overflow-auto'
+                    : 'flex items-center justify-center',
+                ]"
+              >
+                <img
+                  v-if="isImage(doc.mimeType)"
+                  :src="`/api/documents/${doc.id}/file`"
+                  :alt="doc.name"
+                  :class="
+                    fullscreenZoomed
+                      ? 'w-full'
+                      : 'max-h-full max-w-full object-contain'
+                  "
+                />
+                <iframe
+                  v-else
+                  :src="`/api/documents/${doc.id}/file`"
+                  :title="doc.name"
+                  class="h-full w-full"
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
+
+        <!-- OCR text panel -->
+        <Collapsible v-if="doc.textContent" v-model:open="textContentOpen">
+          <Card>
+            <CollapsibleTrigger as-child>
+              <CardHeader class="cursor-pointer select-none">
+                <CardTitle class="flex items-center gap-2">
+                  <ScanText class="text-muted-foreground size-4" />
+                  Erkannter Text
+                </CardTitle>
+                <CardAction>
+                  <div class="flex items-center gap-2">
+                    <span class="text-muted-foreground text-xs font-normal">
+                      {{ wordCount(doc.textContent).toLocaleString('de-DE') }}
+                      Wörter
+                    </span>
+                    <ChevronsUpDown class="text-muted-foreground size-4" />
+                  </div>
+                </CardAction>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent>
+                <div
+                  class="bg-muted/30 max-h-80 overflow-y-auto rounded-md p-4"
+                >
+                  <p class="text-muted-foreground mb-2 text-xs italic">
+                    Automatisch extrahierter Text — kann Fehler enthalten.
+                  </p>
+                  <Separator class="mb-3" />
+                  <pre
+                    class="font-sans text-sm leading-relaxed break-words whitespace-pre-wrap"
+                    >{{ doc.textContent }}</pre
+                  >
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       </div>
 
       <!-- Sidebar -->
