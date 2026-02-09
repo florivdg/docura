@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { CirclePlus, FileUp } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
@@ -10,11 +11,18 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
 import { type NavItem, isNavItemActive } from '@/lib/nav'
+import UploadDialog from '@/components/documents/UploadDialog.vue'
 
-const props = defineProps<{
-  items: NavItem[]
-  currentPath: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    items: NavItem[]
+    currentPath: string
+    maxFileSizeMb?: number
+  }>(),
+  { maxFileSizeMb: 50 },
+)
+
+const uploadOpen = ref(false)
 </script>
 
 <template>
@@ -25,6 +33,7 @@ const props = defineProps<{
           <SidebarMenuButton
             tooltip="Dokument hochladen"
             class="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground min-w-8 duration-200 ease-linear"
+            @click="uploadOpen = true"
           >
             <CirclePlus />
             <span>Neues Dokument</span>
@@ -33,6 +42,7 @@ const props = defineProps<{
             size="icon"
             class="size-8 group-data-[collapsible=icon]:opacity-0"
             variant="outline"
+            @click="uploadOpen = true"
           >
             <FileUp />
             <span class="sr-only">Hochladen</span>
@@ -55,4 +65,8 @@ const props = defineProps<{
       </SidebarMenu>
     </SidebarGroupContent>
   </SidebarGroup>
+  <UploadDialog
+    v-model:open="uploadOpen"
+    :max-file-size-mb="props.maxFileSizeMb"
+  />
 </template>

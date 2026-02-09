@@ -53,17 +53,17 @@ const navMain = [
   },
   {
     title: 'Dokumente',
-    url: '#',
+    url: '/documents',
     icon: FileText,
   },
   {
     title: 'Ordner',
-    url: '#',
+    url: '/folders',
     icon: FolderOpen,
   },
   {
     title: 'Tags',
-    url: '#',
+    url: '/tags',
     icon: Tag,
   },
 ]
