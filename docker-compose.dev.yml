@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docura_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-docura}
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./docker/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
@@ -20,6 +20,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  ocr:
+    build: ./services/ocr
+    container_name: docura-ocr
+    restart: unless-stopped
+    environment:
+      OCR_ENGINE: 'tesseract'
+      OCR_TESSERACT_LANG: 'deu'
+    ports:
+      - '8100:8100'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8100/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data:
