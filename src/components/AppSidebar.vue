@@ -19,15 +19,21 @@ import NavDocuments from '@/components/NavDocuments.vue'
 import NavMain from '@/components/NavMain.vue'
 import NavSecondary from '@/components/NavSecondary.vue'
 import NavUser from '@/components/NavUser.vue'
+import SearchCommand from '@/components/SearchCommand.vue'
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { useSearchCommand } from '@/composables/useSearchCommand'
+
+const { openSearch } = useSearchCommand()
 
 const session = authClient.useSession()
 
@@ -97,11 +103,6 @@ const navSecondary = [
     url: '#',
     icon: HelpCircle,
   },
-  {
-    title: 'Suche',
-    url: '#',
-    icon: Search,
-  },
 ]
 </script>
 
@@ -124,6 +125,23 @@ const navSecondary = [
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="navMain" :current-path="currentPath" />
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton @click="openSearch">
+                <Search />
+                <span>Suche</span>
+                <kbd
+                  class="bg-muted text-muted-foreground ml-auto inline-flex h-5 items-center rounded px-1.5 font-mono text-[10px] font-medium"
+                >
+                  ⌘K
+                </kbd>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
       <NavDocuments :items="navDocuments" />
       <NavSecondary
         :items="navSecondary"
@@ -135,4 +153,5 @@ const navSecondary = [
       <NavUser :user="userData" />
     </SidebarFooter>
   </Sidebar>
+  <SearchCommand />
 </template>
