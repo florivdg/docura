@@ -8,6 +8,18 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { formatFileSize } from '@/lib/format'
+
+defineProps<{
+  stats: {
+    documentCount: number
+    folderCount: number
+    tagCount: number
+    totalStorageBytes: number
+  } | null
+  loading: boolean
+}>()
 </script>
 
 <template>
@@ -20,7 +32,8 @@ import {
         <CardTitle
           class="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl"
         >
-          142
+          <Skeleton v-if="loading" class="h-8 w-16" />
+          <template v-else>{{ stats?.documentCount ?? 0 }}</template>
         </CardTitle>
       </CardHeader>
       <CardFooter class="flex-col items-start gap-1.5 text-sm">
@@ -36,7 +49,8 @@ import {
         <CardTitle
           class="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl"
         >
-          12
+          <Skeleton v-if="loading" class="h-8 w-12" />
+          <template v-else>{{ stats?.folderCount ?? 0 }}</template>
         </CardTitle>
       </CardHeader>
       <CardFooter class="flex-col items-start gap-1.5 text-sm">
@@ -52,7 +66,8 @@ import {
         <CardTitle
           class="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl"
         >
-          28
+          <Skeleton v-if="loading" class="h-8 w-12" />
+          <template v-else>{{ stats?.tagCount ?? 0 }}</template>
         </CardTitle>
       </CardHeader>
       <CardFooter class="flex-col items-start gap-1.5 text-sm">
@@ -68,7 +83,10 @@ import {
         <CardTitle
           class="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl"
         >
-          1,2 GB
+          <Skeleton v-if="loading" class="h-8 w-20" />
+          <template v-else>{{
+            formatFileSize(stats?.totalStorageBytes ?? 0)
+          }}</template>
         </CardTitle>
       </CardHeader>
       <CardFooter class="flex-col items-start gap-1.5 text-sm">

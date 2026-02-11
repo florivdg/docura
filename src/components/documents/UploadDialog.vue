@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { FileUp, X, CheckCircle, Loader2, AlertCircle } from 'lucide-vue-next'
+import { formatFileSize } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -41,12 +42,6 @@ const open = defineModel<boolean>('open', { default: false })
 const isDragOver = ref(false)
 const uploads = ref<UploadItem[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 function validateFile(file: File): string | null {
   if (!ALLOWED_TYPES.includes(file.type)) {

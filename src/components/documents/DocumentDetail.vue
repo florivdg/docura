@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AcceptableValue } from 'reka-ui'
 import { onMounted, ref } from 'vue'
+import { formatFileSize } from '@/lib/format'
 import {
   ArrowLeft,
   Download,
@@ -155,12 +156,6 @@ const stepLabels: Record<string, string> = {
   text_extraction: 'Textextraktion',
   ocr: 'Texterkennung',
   embedding: 'Einbettung',
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const dateFormatter = new Intl.DateTimeFormat('de-DE', {

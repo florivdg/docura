@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { FileText, FolderOpen, Loader2, Sparkles, Text } from 'lucide-vue-next'
+import { formatFileSize } from '@/lib/format'
 import {
   CommandDialog,
   CommandEmpty,
@@ -32,12 +33,6 @@ interface SearchResult {
 }
 
 const results = ref<SearchResult[]>([])
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 async function performSearch(query: string) {
   if (!query.trim()) {
