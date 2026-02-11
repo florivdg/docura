@@ -108,6 +108,7 @@ async function submit() {
             v-model="name"
             placeholder="Tagname"
             :aria-invalid="!!error"
+            data-1p-ignore
           />
           <p v-if="error" class="text-destructive text-sm">{{ error }}</p>
         </div>
