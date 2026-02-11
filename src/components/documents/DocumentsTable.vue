@@ -20,6 +20,12 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface DocumentTag {
   id: string
@@ -104,7 +110,6 @@ onMounted(async () => {
         <TableHead>Tags</TableHead>
         <TableHead>Größe</TableHead>
         <TableHead>Status</TableHead>
-        <TableHead>Schritt</TableHead>
         <TableHead>Hochgeladen</TableHead>
       </TableRow>
     </TableHeader>
@@ -126,12 +131,11 @@ onMounted(async () => {
           </TableCell>
           <TableCell><Skeleton class="h-4 w-16" /></TableCell>
           <TableCell><Skeleton class="h-5 w-24" /></TableCell>
-          <TableCell><Skeleton class="h-4 w-20" /></TableCell>
           <TableCell><Skeleton class="h-4 w-28" /></TableCell>
         </TableRow>
       </template>
       <template v-else-if="documents.length === 0">
-        <TableEmpty :colspan="7">
+        <TableEmpty :colspan="6">
           <div class="flex flex-col items-center gap-2">
             <FileText class="text-muted-foreground size-8" />
             <p class="text-muted-foreground text-sm">
@@ -183,7 +187,45 @@ onMounted(async () => {
           </TableCell>
           <TableCell>
             <template v-if="doc.processingStatus">
+              <TooltipProvider v-if="doc.processingStep">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Badge
+                      :variant="
+                        statusConfig[doc.processingStatus]?.variant ??
+                        'secondary'
+                      "
+                      :class="statusConfig[doc.processingStatus]?.class"
+                    >
+                      <Clock
+                        v-if="doc.processingStatus === 'pending'"
+                        class="size-3"
+                      />
+                      <Loader2
+                        v-else-if="doc.processingStatus === 'processing'"
+                        class="size-3 animate-spin"
+                      />
+                      <CheckCircle2
+                        v-else-if="doc.processingStatus === 'completed'"
+                        class="size-3"
+                      />
+                      <CircleAlert
+                        v-else-if="doc.processingStatus === 'failed'"
+                        class="size-3"
+                      />
+                      {{
+                        statusConfig[doc.processingStatus]?.label ??
+                        doc.processingStatus
+                      }}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {{ stepLabels[doc.processingStep] ?? doc.processingStep }}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <Badge
+                v-else
                 :variant="
                   statusConfig[doc.processingStatus]?.variant ?? 'secondary'
                 "
@@ -211,12 +253,6 @@ onMounted(async () => {
                 }}
               </Badge>
             </template>
-            <span v-else class="text-muted-foreground">—</span>
-          </TableCell>
-          <TableCell>
-            <span v-if="doc.processingStep">
-              {{ stepLabels[doc.processingStep] ?? doc.processingStep }}
-            </span>
             <span v-else class="text-muted-foreground">—</span>
           </TableCell>
           <TableCell class="whitespace-nowrap">
