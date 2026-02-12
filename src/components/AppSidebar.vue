@@ -77,7 +77,7 @@ const navMain = [
 const navDocuments = [
   {
     name: 'Zuletzt hochgeladen',
-    url: '#',
+    url: '/documents?sort=createdAt&order=desc',
     icon: Upload,
   },
   {
