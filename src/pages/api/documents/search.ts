@@ -10,6 +10,7 @@ import {
   processingJob,
   tag,
 } from '@/db/schema/documents'
+import { generateEmbedding } from '@/worker/clients/ollama'
 
 interface FilterParams {
   folderIds: string[]
@@ -28,12 +29,6 @@ interface PaginationParams {
   offset: number
   page: number
 }
-
-const OLLAMA_URL = import.meta.env.OLLAMA_URL || 'http://localhost:11434'
-const OLLAMA_EMBED_MODEL =
-  import.meta.env.OLLAMA_EMBED_MODEL || 'mxbai-embed-large'
-const EMBEDDING_DIMENSIONS = 1024
-const OLLAMA_TIMEOUT_MS = 30_000
 
 export const GET: APIRoute = async ({ url }) => {
   const query = url.searchParams.get('q')?.trim()
@@ -342,27 +337,8 @@ async function handleSemanticSearch(
 ) {
   let queryVector: number[]
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS)
-    try {
-      const response = await fetch(`${OLLAMA_URL}/api/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_EMBED_MODEL,
-          input: query,
-          dimensions: EMBEDDING_DIMENSIONS,
-        }),
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        throw new Error(`Ollama Fehler: ${response.status}`)
-      }
-      const result = (await response.json()) as { embeddings: number[][] }
-      queryVector = result.embeddings[0]
-    } finally {
-      clearTimeout(timeoutId)
-    }
+    const embeddings = await generateEmbedding(query)
+    queryVector = embeddings[0]
   } catch {
     return new Response(
       JSON.stringify({
