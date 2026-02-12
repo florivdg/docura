@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SectionCards from '@/components/SectionCards.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import RecentActivity from '@/components/dashboard/RecentActivity.vue'
 import DocumentOverview from '@/components/dashboard/DocumentOverview.vue'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { useProcessingEvents } from '@/composables/useProcessingEvents'
 
 interface DashboardStats {
   documentCount: number
@@ -35,7 +36,7 @@ const stats = ref<DashboardStats | null>(null)
 const recentDocuments = ref<RecentDocument[]>([])
 const documentsByType = ref<TypeBreakdown[]>([])
 
-onMounted(async () => {
+async function fetchDashboard() {
   try {
     const res = await fetch('/api/dashboard/stats')
     if (res.ok) {
@@ -47,6 +48,31 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+}
+
+useProcessingEvents((event) => {
+  const doc = recentDocuments.value.find((d) => d.id === event.documentId)
+  if (doc) {
+    doc.processingStatus = event.status
+    if (event.type === 'completed' || event.type === 'failed') {
+      void fetchDashboard()
+    }
+  } else {
+    void fetchDashboard()
+  }
+})
+
+function onDocumentUploaded() {
+  void fetchDashboard()
+}
+
+onMounted(() => {
+  void fetchDashboard()
+  window.addEventListener('document-uploaded', onDocumentUploaded)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('document-uploaded', onDocumentUploaded)
 })
 </script>
 

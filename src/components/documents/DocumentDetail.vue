@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { AcceptableValue } from 'reka-ui'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { formatFileSize } from '@/lib/format'
+import { useProcessingEvents } from '@/composables/useProcessingEvents'
 import {
   ArrowLeft,
   Download,
@@ -327,6 +328,54 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+async function refetchDocument() {
+  try {
+    const res = await fetch(`/api/documents/${props.documentId}`)
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    }
+  } catch {
+    // ignore
+  }
+}
+
+const hasActiveProcessing = computed(
+  () =>
+    doc.value?.processingJobs.some(
+      (j) => j.status === 'pending' || j.status === 'processing',
+    ) ?? false,
+)
+
+useProcessingEvents(
+  (event) => {
+    if (!doc.value || event.documentId !== props.documentId) return
+
+    if (event.type === 'step_change') {
+      const job = doc.value.processingJobs.find((j) => j.id === event.jobId)
+      if (job) {
+        job.status = event.status
+        job.step = event.step
+      }
+    } else if (event.type === 'completed') {
+      const job = doc.value.processingJobs.find((j) => j.id === event.jobId)
+      if (job) {
+        job.status = 'completed'
+        job.step = null
+      }
+      void refetchDocument()
+    } else if (event.type === 'failed') {
+      const job = doc.value.processingJobs.find((j) => j.id === event.jobId)
+      if (job) {
+        job.status = 'failed'
+        job.step = null
+        job.errorMessage = event.errorMessage ?? null
+      }
+    }
+  },
+  { enabled: hasActiveProcessing },
+)
 </script>
 
 <template>

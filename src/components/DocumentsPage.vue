@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import DocumentsFilterBar from '@/components/documents/DocumentsFilterBar.vue'
@@ -23,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useDocumentsFilter } from '@/composables/useDocumentsFilter'
+import { useProcessingEvents } from '@/composables/useProcessingEvents'
 
 const {
   query,
@@ -45,8 +47,47 @@ const {
   goToPage,
 } = useDocumentsFilter()
 
+const debouncedRefetch = useDebounceFn(fetchDocuments, 500)
+
+useProcessingEvents((event) => {
+  if (event.type === 'step_change') {
+    const doc = documents.value.find((d) => d.id === event.documentId)
+    if (doc) {
+      doc.processingStatus = event.status
+      doc.processingStep = event.step
+    } else {
+      void debouncedRefetch()
+    }
+  } else if (event.type === 'completed') {
+    const doc = documents.value.find((d) => d.id === event.documentId)
+    if (doc) {
+      doc.processingStatus = 'completed'
+      doc.processingStep = null
+    }
+    void debouncedRefetch()
+  } else if (event.type === 'failed') {
+    const doc = documents.value.find((d) => d.id === event.documentId)
+    if (doc) {
+      doc.processingStatus = 'failed'
+      doc.processingStep = null
+      doc.processingError = event.errorMessage ?? null
+    } else {
+      void debouncedRefetch()
+    }
+  }
+})
+
+function onDocumentUploaded() {
+  void fetchDocuments()
+}
+
 onMounted(() => {
   void fetchDocuments()
+  window.addEventListener('document-uploaded', onDocumentUploaded)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('document-uploaded', onDocumentUploaded)
 })
 </script>
 

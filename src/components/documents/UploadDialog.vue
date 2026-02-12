@@ -146,6 +146,7 @@ async function uploadFile(uploadId: string) {
 
     current.progress = 100
     current.status = 'completed'
+    window.dispatchEvent(new CustomEvent('document-uploaded'))
   } catch (error) {
     const current = getUpload(uploadId)
     if (!current) return
