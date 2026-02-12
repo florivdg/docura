@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CheckCircle2,
   CircleAlert,
   Clock,
   FileText,
   Image,
   Loader2,
+  SearchX,
 } from 'lucide-vue-next'
 import { formatFileSize } from '@/lib/format'
 import {
@@ -47,8 +50,20 @@ interface DocumentRow {
   processingError: string | null
 }
 
-const documents = ref<DocumentRow[]>([])
-const loading = ref(true)
+const props = defineProps<{
+  documents: DocumentRow[]
+  loading: boolean
+  hasActiveFilters?: boolean
+  sortColumn: string | null
+  sortOrder: string
+}>()
+
+const emit = defineEmits<{ sort: [column: string] }>()
+
+function sortIcon(column: string) {
+  if (props.sortColumn !== column) return ArrowUpDown
+  return props.sortOrder === 'asc' ? ArrowUp : ArrowDown
+}
 
 const statusConfig: Record<
   string,
@@ -89,32 +104,44 @@ function formatDate(dateStr: string): string {
 function isImageMime(mime: string): boolean {
   return mime.startsWith('image/')
 }
-
-onMounted(async () => {
-  try {
-    const res = await fetch('/api/documents')
-    const data = await res.json()
-    documents.value = data.documents
-  } finally {
-    loading.value = false
-  }
-})
 </script>
 
 <template>
   <Table>
     <TableHeader>
       <TableRow>
-        <TableHead>Name</TableHead>
+        <TableHead>
+          <button
+            class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            @click="emit('sort', 'name')"
+          >
+            Name <component :is="sortIcon('name')" class="size-3.5" />
+          </button>
+        </TableHead>
         <TableHead>Ordner</TableHead>
         <TableHead>Tags</TableHead>
-        <TableHead>Größe</TableHead>
+        <TableHead>
+          <button
+            class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            @click="emit('sort', 'fileSize')"
+          >
+            Größe <component :is="sortIcon('fileSize')" class="size-3.5" />
+          </button>
+        </TableHead>
         <TableHead>Status</TableHead>
-        <TableHead>Hochgeladen</TableHead>
+        <TableHead>
+          <button
+            class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            @click="emit('sort', 'createdAt')"
+          >
+            Hochgeladen
+            <component :is="sortIcon('createdAt')" class="size-3.5" />
+          </button>
+        </TableHead>
       </TableRow>
     </TableHeader>
     <TableBody>
-      <template v-if="loading">
+      <template v-if="props.loading">
         <TableRow v-for="i in 5" :key="i">
           <TableCell>
             <div class="flex items-center gap-2">
@@ -134,18 +161,25 @@ onMounted(async () => {
           <TableCell><Skeleton class="h-4 w-28" /></TableCell>
         </TableRow>
       </template>
-      <template v-else-if="documents.length === 0">
+      <template v-else-if="props.documents.length === 0">
         <TableEmpty :colspan="6">
           <div class="flex flex-col items-center gap-2">
-            <FileText class="text-muted-foreground size-8" />
+            <component
+              :is="props.hasActiveFilters ? SearchX : FileText"
+              class="text-muted-foreground size-8"
+            />
             <p class="text-muted-foreground text-sm">
-              Noch keine Dokumente vorhanden
+              {{
+                props.hasActiveFilters
+                  ? 'Keine Dokumente gefunden'
+                  : 'Noch keine Dokumente vorhanden'
+              }}
             </p>
           </div>
         </TableEmpty>
       </template>
       <template v-else>
-        <TableRow v-for="doc in documents" :key="doc.id">
+        <TableRow v-for="doc in props.documents" :key="doc.id">
           <TableCell>
             <div class="flex items-center gap-2">
               <component
