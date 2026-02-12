@@ -155,6 +155,7 @@ const statusConfig: Record<
 const stepLabels: Record<string, string> = {
   text_extraction: 'Textextraktion',
   ocr: 'Texterkennung',
+  llm_analysis: 'KI-Analyse',
   embedding: 'Einbettung',
 }
 
