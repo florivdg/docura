@@ -5,12 +5,19 @@ import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
-import { document, processingJob } from '@/db/schema/documents'
+import {
+  document,
+  documentTag,
+  folder,
+  processingJob,
+  tag,
+} from '@/db/schema/documents'
 
 const POLL_INTERVAL_MS = 3000
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads'
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
 const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'mxbai-embed-large'
+const OLLAMA_LLM_MODEL = process.env.OLLAMA_LLM_MODEL || 'llama3'
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8100'
 const EMBEDDING_DIMENSIONS = 1024
 const EXPECTED_EMBEDDING_COLUMN_TYPE = `vector(${EMBEDDING_DIMENSIONS})`
@@ -189,6 +196,243 @@ async function storeEmbedding(documentId: string, vector: number[]) {
   }
 }
 
+const LLM_TEXT_LIMIT = 3000
+
+/**
+ * Structured result from LLM document analysis.
+ */
+interface LlmAnalysisResult {
+  title: string | null
+  tags: string[]
+  folderSuggestion: string | null
+}
+
+function sanitizeTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  let title = value.trim()
+
+  // Strip surrounding quotes
+  if (
+    (title.startsWith('"') && title.endsWith('"')) ||
+    (title.startsWith('„') && title.endsWith('"')) ||
+    (title.startsWith("'") && title.endsWith("'"))
+  ) {
+    title = title.slice(1, -1).trim()
+  }
+
+  // Remove trailing period
+  if (title.endsWith('.')) title = title.slice(0, -1).trim()
+
+  // Length bounds
+  if (title.length < 2 || title.length > 200) return null
+
+  return title
+}
+
+function sanitizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && item.length <= 50)
+    .slice(0, 5)
+}
+
+function sanitizeFolderSuggestion(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (trimmed.length < 1 || trimmed.length > 100) return null
+  return trimmed
+}
+
+async function loadExistingMetadata() {
+  const existingTags = await db.select({ id: tag.id, name: tag.name }).from(tag)
+  const existingFolders = await db
+    .select({ id: folder.id, name: folder.name })
+    .from(folder)
+  return { existingTags, existingFolders }
+}
+
+async function findOrCreateTag(
+  tagName: string,
+): Promise<{ id: string } | null> {
+  const lowerName = tagName.trim().toLowerCase()
+
+  // Case-insensitive search for existing tag
+  const existing = await db
+    .select({ id: tag.id })
+    .from(tag)
+    .where(sql`lower(${tag.name}) = ${lowerName}`)
+    .limit(1)
+
+  if (existing.length > 0) return existing[0]
+
+  // Create new tag
+  try {
+    const [created] = await db
+      .insert(tag)
+      .values({ name: tagName.trim() })
+      .returning({ id: tag.id })
+    return created
+  } catch (error) {
+    // Unique constraint violation (race condition) — retry search
+    const retry = await db
+      .select({ id: tag.id })
+      .from(tag)
+      .where(sql`lower(${tag.name}) = ${lowerName}`)
+      .limit(1)
+    if (retry.length > 0) return retry[0]
+
+    console.warn(
+      `Tag "${tagName}" konnte nicht erstellt werden:`,
+      error instanceof Error ? error.message : String(error),
+    )
+    return null
+  }
+}
+
+async function applyTags(documentId: string, tagNames: string[]) {
+  try {
+    const tagIds: string[] = []
+    for (const name of tagNames) {
+      const result = await findOrCreateTag(name)
+      if (result) tagIds.push(result.id)
+    }
+
+    if (tagIds.length > 0) {
+      await db
+        .insert(documentTag)
+        .values(tagIds.map((tagId) => ({ documentId, tagId })))
+        .onConflictDoNothing()
+      console.log(
+        `${tagIds.length} Tag(s) zugewiesen für Dokument ${documentId}`,
+      )
+    }
+  } catch (error) {
+    console.warn(
+      `Tags konnten nicht zugewiesen werden für Dokument ${documentId}:`,
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+async function applyFolderSuggestion(
+  doc: { id: string; folderId: string | null },
+  folderSuggestion: string,
+) {
+  try {
+    // Skip if document already has a folder assigned
+    if (doc.folderId !== null) return
+
+    const lowerName = folderSuggestion.trim().toLowerCase()
+    const existing = await db
+      .select({ id: folder.id })
+      .from(folder)
+      .where(sql`lower(${folder.name}) = ${lowerName}`)
+      .limit(1)
+
+    if (existing.length > 0) {
+      await db
+        .update(document)
+        .set({ folderId: existing[0].id })
+        .where(eq(document.id, doc.id))
+      console.log(
+        `Ordner "${folderSuggestion}" zugewiesen für Dokument ${doc.id}`,
+      )
+    } else {
+      console.log(
+        `Ordnervorschlag "${folderSuggestion}" für Dokument ${doc.id} — kein passender Ordner gefunden`,
+      )
+    }
+  } catch (error) {
+    console.warn(
+      `Ordner konnte nicht zugewiesen werden für Dokument ${doc.id}:`,
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+async function analyzeLlm(
+  textContent: string,
+  existingTags: { id: string; name: string }[],
+  existingFolders: { id: string; name: string }[],
+): Promise<LlmAnalysisResult> {
+  const empty: LlmAnalysisResult = {
+    title: null,
+    tags: [],
+    folderSuggestion: null,
+  }
+  const truncatedText = textContent.substring(0, LLM_TEXT_LIMIT)
+
+  const tagList =
+    existingTags.length > 0
+      ? existingTags.map((t) => t.name).join(', ')
+      : '(keine vorhanden)'
+  const folderList =
+    existingFolders.length > 0
+      ? existingFolders.map((f) => f.name).join(', ')
+      : '(keine vorhanden)'
+
+  const prompt = `Du bist ein Dokumentenmanagement-Assistent. Analysiere den folgenden Dokumententext und extrahiere strukturierte Metadaten.
+
+Aufgaben:
+1. Erstelle einen kurzen, prägnanten deutschen Titel (maximal 10 Wörter), der den Inhalt treffend beschreibt.
+2. Wähle bis zu 5 passende Tags aus der folgenden Liste. Verwende ausschließlich vorhandene Tags, es sei denn, keiner passt — nur dann darfst du einen neuen Tag-Namen vorschlagen.
+3. Schlage einen passenden vorhandenen Ordner vor, in den das Dokument einsortiert werden könnte. Falls kein Ordner passt, setze null.
+
+Vorhandene Tags: ${tagList}
+Vorhandene Ordner: ${folderList}
+
+Antworte ausschließlich mit validem JSON in diesem Format:
+{"title": "Der generierte Titel", "tags": ["Tag1", "Tag2"], "folderSuggestion": "Ordnername" oder null}
+
+Dokumententext:
+${truncatedText}`
+
+  try {
+    const response = await fetchWithTimeout(
+      `${OLLAMA_URL}/api/generate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: OLLAMA_LLM_MODEL,
+          prompt,
+          stream: false,
+          format: 'json',
+        }),
+      },
+      OLLAMA_TIMEOUT_MS,
+    )
+
+    if (!response.ok) {
+      console.warn(
+        `LLM-Analyse fehlgeschlagen: ${response.status} ${response.statusText}`,
+      )
+      return empty
+    }
+
+    const raw = (await response.json()) as { response: string }
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(raw.response)
+    } catch {
+      console.warn('LLM-Analyse: Antwort ist kein valides JSON')
+      return empty
+    }
+
+    return {
+      title: sanitizeTitle(parsed.title),
+      tags: sanitizeTags(parsed.tags),
+      folderSuggestion: sanitizeFolderSuggestion(parsed.folderSuggestion),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`LLM-Analyse fehlgeschlagen: ${message}`)
+    return empty
+  }
+}
+
 async function processJob(job: Record<string, any>) {
   const jobId = job.id as string
   const documentId = job.document_id as string
@@ -305,6 +549,36 @@ async function processJob(job: Record<string, any>) {
       .set({ textContent: extractedText })
       .where(eq(document.id, doc.id))
 
+    // LLM analysis (non-fatal)
+    if (extractedText.length > 0) {
+      await updateStep(jobId, 'llm_analysis')
+
+      const { existingTags, existingFolders } = await loadExistingMetadata()
+      const analysis = await analyzeLlm(
+        extractedText,
+        existingTags,
+        existingFolders,
+      )
+
+      if (analysis.title) {
+        await db
+          .update(document)
+          .set({ name: analysis.title })
+          .where(eq(document.id, doc.id))
+        console.log(
+          `Titel generiert für Dokument ${doc.id}: "${analysis.title}"`,
+        )
+      }
+
+      if (analysis.tags.length > 0) {
+        await applyTags(doc.id, analysis.tags)
+      }
+
+      if (analysis.folderSuggestion) {
+        await applyFolderSuggestion(doc, analysis.folderSuggestion)
+      }
+    }
+
     // Embedding
     if (extractedText.length > 0) {
       await updateStep(jobId, 'embedding')
@@ -407,6 +681,7 @@ async function main() {
   console.log(`  OLLAMA_URL: ${OLLAMA_URL}`)
   console.log(`  OCR_SERVICE_URL: ${OCR_SERVICE_URL}`)
   console.log(`  OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL}`)
+  console.log(`  OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL}`)
   console.log(`  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS}`)
   console.log(`  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY}`)
   await assertDatabaseCompatibility()
