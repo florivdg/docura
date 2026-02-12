@@ -19,7 +19,9 @@ const props = defineProps<{
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ saved: [] }>()
+const emit = defineEmits<{
+  saved: [tag: { id: string; name: string; color: string | null }]
+}>()
 
 const name = ref('')
 const color = ref<string | null>(null)
@@ -77,7 +79,8 @@ async function submit() {
       return
     }
 
-    emit('saved')
+    const data = await res.json()
+    emit('saved', data.tag)
   } finally {
     saving.value = false
   }

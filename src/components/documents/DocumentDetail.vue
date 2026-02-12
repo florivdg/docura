@@ -281,9 +281,14 @@ async function fetchAllTags() {
   }
 }
 
-async function handleTagCreated() {
+async function handleTagCreated(tag: {
+  id: string
+  name: string
+  color: string | null
+}) {
   tagDialogOpen.value = false
   await fetchAllTags()
+  await handleTagToggle(tag.id, true)
 }
 
 onMounted(async () => {
