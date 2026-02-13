@@ -17,4 +17,10 @@ export const WORKER_CONFIG = {
     'image/webp',
     'image/tiff',
   ]),
+  watchDir: process.env.WATCH_DIR || './watch',
+  watchEnabled: process.env.WATCH_ENABLED !== 'false',
+  watchStabilityMs: 2000,
+  watchDebounceMs: 500,
+  watchRescanIntervalMs: 60_000,
+  maxFileSizeMB: Number(process.env.MAX_FILE_SIZE_MB || '50'),
 } as const
