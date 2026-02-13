@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AcceptableValue } from 'reka-ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { formatFileSize, isImageMime } from '@/lib/format'
 import { apiFetch } from '@/lib/api-fetch'
 import { statusConfig, stepLabels } from '@/lib/processing'
@@ -23,6 +23,7 @@ import {
   Maximize2,
   ZoomIn,
   ZoomOut,
+  Pencil,
 } from 'lucide-vue-next'
 import {
   Card,
@@ -73,6 +74,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import TagDialog from '@/components/tags/TagDialog.vue'
@@ -122,6 +124,45 @@ const notFound = ref(false)
 const error = ref(false)
 const deleting = ref(false)
 const textContentOpen = ref(false)
+const editingName = ref(false)
+const editNameValue = ref('')
+const editNameInput = ref<InstanceType<typeof Input> | null>(null)
+
+async function startEditName() {
+  if (!doc.value) return
+  editNameValue.value = doc.value.name
+  editingName.value = true
+  await nextTick()
+  const el = editNameInput.value?.$el as HTMLInputElement | undefined
+  el?.focus()
+}
+
+async function saveDocName() {
+  if (!doc.value) return
+  const trimmed = editNameValue.value.trim()
+  if (!trimmed || trimmed === doc.value.name) {
+    editingName.value = false
+    return
+  }
+  const prev = doc.value.name
+  doc.value.name = trimmed
+  editingName.value = false
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    } else {
+      doc.value.name = prev
+    }
+  } catch {
+    if (doc.value) doc.value.name = prev
+  }
+}
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
@@ -409,13 +450,32 @@ useProcessingEvents(
     <div
       class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
     >
-      <div class="flex items-center gap-3">
+      <div class="flex min-w-0 flex-1 items-center gap-3">
         <Button variant="ghost" size="icon" as-child>
           <a href="/documents">
             <ArrowLeft class="size-4" />
           </a>
         </Button>
-        <h1 class="truncate text-lg font-semibold">{{ doc.name }}</h1>
+        <Input
+          v-if="editingName"
+          ref="editNameInput"
+          v-model="editNameValue"
+          class="h-8 w-full max-w-lg text-lg font-semibold"
+          @keydown.enter="saveDocName"
+          @keydown.escape="editingName = false"
+          @blur="saveDocName"
+        />
+        <h1
+          v-else
+          class="group flex cursor-pointer items-center gap-1.5 truncate text-lg font-semibold"
+          title="Klicken zum Bearbeiten"
+          @click="startEditName"
+        >
+          {{ doc.name }}
+          <Pencil
+            class="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-50"
+          />
+        </h1>
       </div>
       <div class="flex gap-2">
         <Button variant="outline" as-child>

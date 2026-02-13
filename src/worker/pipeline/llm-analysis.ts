@@ -39,7 +39,7 @@ async function analyzeLlm(
   const systemPrompt = `Du bist ein Dokumentenmanagement-Assistent. Analysiere den vom Benutzer bereitgestellten Dokumententext und extrahiere strukturierte Metadaten.
 
 Aufgaben:
-1. Erstelle einen kurzen, prägnanten deutschen Titel (maximal 10 Wörter), der den Inhalt treffend beschreibt.
+1. Erstelle einen kurzen, prägnanten deutschen Titel (maximal 10 Wörter), der den Inhalt treffend beschreibt. Verwende ausschließlich Plaintext — kein Markdown, keine Sonderformatierung.
 2. Wähle bis zu 5 passende Tags aus der folgenden Liste. Verwende ausschließlich vorhandene Tags, es sei denn, keiner passt — nur dann darfst du einen neuen Tag-Namen vorschlagen.
 3. Schlage einen passenden vorhandenen Ordner vor, in den das Dokument einsortiert werden könnte. Falls kein Ordner passt, setze null.
 

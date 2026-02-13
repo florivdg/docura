@@ -150,7 +150,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     })
   }
 
-  let body: { folderId?: string | null; tagIds?: string[] }
+  let body: { folderId?: string | null; tagIds?: string[]; name?: string }
   try {
     body = await parseJsonBody<typeof body>(request)
   } catch (err) {
@@ -187,6 +187,21 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     }
   }
 
+  if ('name' in body) {
+    if (
+      typeof body.name !== 'string' ||
+      body.name.trim().length < 1 ||
+      body.name.trim().length > 200
+    ) {
+      return new Response(
+        JSON.stringify({
+          error: 'Name muss ein nicht-leerer Text sein (maximal 200 Zeichen)',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+  }
+
   if ('tagIds' in body) {
     if (!Array.isArray(tagIds)) {
       return new Response(
@@ -218,6 +233,13 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   }
 
   await db.transaction(async (tx) => {
+    if ('name' in body) {
+      await tx
+        .update(document)
+        .set({ name: body.name!.trim() })
+        .where(eq(document.id, id))
+    }
+
     if ('folderId' in body) {
       await tx
         .update(document)
