@@ -9,15 +9,27 @@ import {
 } from '@/db/schema/documents'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import {
+  isValidUUID,
+  safePath,
+  parseJsonBody,
+  JsonParseError,
+} from '@/lib/api-utils'
 
 export const GET: APIRoute = async ({ params }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [doc] = await db
     .select()
     .from(document)
-    .where(eq(document.id, id!))
+    .where(eq(document.id, id))
     .limit(1)
 
   if (!doc) {
@@ -41,7 +53,7 @@ export const GET: APIRoute = async ({ params }) => {
     .select({ id: tag.id, name: tag.name, color: tag.color })
     .from(documentTag)
     .innerJoin(tag, eq(documentTag.tagId, tag.id))
-    .where(eq(documentTag.documentId, id!))
+    .where(eq(documentTag.documentId, id))
 
   const processingJobs = await db
     .select({
@@ -55,7 +67,7 @@ export const GET: APIRoute = async ({ params }) => {
       createdAt: processingJob.createdAt,
     })
     .from(processingJob)
-    .where(eq(processingJob.documentId, id!))
+    .where(eq(processingJob.documentId, id))
     .orderBy(desc(processingJob.createdAt))
 
   return new Response(
@@ -80,10 +92,17 @@ export const GET: APIRoute = async ({ params }) => {
 export const DELETE: APIRoute = async ({ params }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [doc] = await db
     .select({ id: document.id, storagePath: document.storagePath })
     .from(document)
-    .where(eq(document.id, id!))
+    .where(eq(document.id, id))
     .limit(1)
 
   if (!doc) {
@@ -95,12 +114,13 @@ export const DELETE: APIRoute = async ({ params }) => {
 
   const uploadDir = process.env.UPLOAD_DIR || './uploads'
   try {
-    await unlink(join(uploadDir, doc.storagePath))
+    const filePath = safePath(uploadDir, doc.storagePath)
+    await unlink(filePath)
   } catch (err: any) {
     if (err.code !== 'ENOENT') throw err
   }
 
-  await db.delete(document).where(eq(document.id, id!))
+  await db.delete(document).where(eq(document.id, id))
 
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' },
@@ -110,10 +130,17 @@ export const DELETE: APIRoute = async ({ params }) => {
 export const PATCH: APIRoute = async ({ params, request }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [doc] = await db
     .select({ id: document.id })
     .from(document)
-    .where(eq(document.id, id!))
+    .where(eq(document.id, id))
     .limit(1)
 
   if (!doc) {
@@ -123,18 +150,32 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     })
   }
 
-  const body = await request.json()
-  const { folderId, tagIds } = body as {
-    folderId?: string | null
-    tagIds?: string[]
+  let body: { folderId?: string | null; tagIds?: string[] }
+  try {
+    body = await parseJsonBody<typeof body>(request)
+  } catch (err) {
+    if (err instanceof JsonParseError) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw err
   }
+  const { folderId, tagIds } = body
 
   if ('folderId' in body) {
-    if (folderId !== null) {
+    if (folderId !== null && folderId !== undefined) {
+      if (!isValidUUID(folderId)) {
+        return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
       const [f] = await db
         .select({ id: folder.id })
         .from(folder)
-        .where(eq(folder.id, folderId!))
+        .where(eq(folder.id, folderId))
         .limit(1)
 
       if (!f) {
@@ -144,11 +185,6 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         )
       }
     }
-
-    await db
-      .update(document)
-      .set({ folderId: folderId ?? null })
-      .where(eq(document.id, id!))
   }
 
   if ('tagIds' in body) {
@@ -157,6 +193,13 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         JSON.stringify({ error: 'tagIds muss ein Array sein' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } },
       )
+    }
+
+    if (tagIds.some((t) => !isValidUUID(t))) {
+      return new Response(JSON.stringify({ error: 'Ungültige Tag-ID' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     if (tagIds.length > 0) {
@@ -172,21 +215,32 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         )
       }
     }
-
-    await db.delete(documentTag).where(eq(documentTag.documentId, id!))
-
-    if (tagIds.length > 0) {
-      await db
-        .insert(documentTag)
-        .values(tagIds.map((tagId) => ({ documentId: id!, tagId })))
-    }
   }
+
+  await db.transaction(async (tx) => {
+    if ('folderId' in body) {
+      await tx
+        .update(document)
+        .set({ folderId: folderId ?? null })
+        .where(eq(document.id, id))
+    }
+
+    if ('tagIds' in body && Array.isArray(tagIds)) {
+      await tx.delete(documentTag).where(eq(documentTag.documentId, id))
+
+      if (tagIds.length > 0) {
+        await tx
+          .insert(documentTag)
+          .values(tagIds.map((tagId) => ({ documentId: id, tagId })))
+      }
+    }
+  })
 
   // Return updated document in same shape as GET
   const [updated] = await db
     .select()
     .from(document)
-    .where(eq(document.id, id!))
+    .where(eq(document.id, id))
     .limit(1)
 
   const docFolder = updated.folderId
@@ -199,11 +253,11 @@ export const PATCH: APIRoute = async ({ params, request }) => {
       )[0] ?? null)
     : null
 
-  const tags = await db
+  const updatedTags = await db
     .select({ id: tag.id, name: tag.name, color: tag.color })
     .from(documentTag)
     .innerJoin(tag, eq(documentTag.tagId, tag.id))
-    .where(eq(documentTag.documentId, id!))
+    .where(eq(documentTag.documentId, id))
 
   const processingJobs = await db
     .select({
@@ -217,7 +271,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
       createdAt: processingJob.createdAt,
     })
     .from(processingJob)
-    .where(eq(processingJob.documentId, id!))
+    .where(eq(processingJob.documentId, id))
     .orderBy(desc(processingJob.createdAt))
 
   return new Response(
@@ -231,7 +285,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         updatedAt: updated.updatedAt,
         textContent: updated.textContent,
         folder: docFolder,
-        tags,
+        tags: updatedTags,
         processingJobs,
       },
     }),

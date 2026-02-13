@@ -49,6 +49,11 @@ export const GET: APIRoute = async () => {
       /* already unsubscribed */
     }
     try {
+      redis.close()
+    } catch {
+      /* already closed */
+    }
+    try {
       controller?.close()
     } catch {
       /* already closed */

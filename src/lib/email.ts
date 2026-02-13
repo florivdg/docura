@@ -74,14 +74,14 @@ export async function sendPasswordResetEmail(
                 <!-- CTA Button -->
                 <tr>
                   <td align="center" style="padding:0 0 24px 0;">
-                    <a href="${url}" target="_blank" style="display:inline-block;background-color:#6d28d9;color:#ffffff;font-size:15px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-decoration:none;padding:12px 32px;border-radius:6px;">Passwort zurücksetzen</a>
+                    <a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;background-color:#6d28d9;color:#ffffff;font-size:15px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-decoration:none;padding:12px 32px;border-radius:6px;">Passwort zurücksetzen</a>
                   </td>
                 </tr>
                 <!-- Fallback URL -->
                 <tr>
                   <td style="padding:0 0 24px 0;font-size:13px;line-height:20px;color:#71717a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                     Falls der Button nicht funktioniert, kopiere den folgenden Link in deinen Browser:<br />
-                    <a href="${url}" style="color:#6d28d9;text-decoration:underline;word-break:break-all;">${url}</a>
+                    <a href="${escapeHtml(url)}" style="color:#6d28d9;text-decoration:underline;word-break:break-all;">${escapeHtml(url)}</a>
                   </td>
                 </tr>
                 <!-- Ignore notice -->
