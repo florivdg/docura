@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { Pencil, Plus, Tag, Trash2 } from 'lucide-vue-next'
+import { apiFetch } from '@/lib/api-fetch'
 import {
   Table,
   TableBody,
@@ -55,7 +56,7 @@ function formatDate(dateStr: string): string {
 async function fetchTags() {
   loading.value = true
   try {
-    const res = await fetch('/api/tags')
+    const res = await apiFetch('/api/tags')
     const data = await res.json()
     tags.value = data.tags
   } finally {
@@ -75,10 +76,22 @@ function openDelete(t: TagRow) {
 
 async function confirmDelete() {
   if (!deleteTag.value) return
-  await fetch(`/api/tags/${deleteTag.value.id}`, { method: 'DELETE' })
-  deleteOpen.value = false
-  deleteTag.value = null
-  await fetchTags()
+  try {
+    const res = await apiFetch(`/api/tags/${deleteTag.value.id}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      console.error('Tag löschen fehlgeschlagen:', res.status)
+      window.alert('Fehler beim Löschen des Tags.')
+      return
+    }
+    deleteOpen.value = false
+    deleteTag.value = null
+    await fetchTags()
+  } catch (err) {
+    console.error('Tag löschen fehlgeschlagen:', err)
+    window.alert('Fehler beim Löschen des Tags.')
+  }
 }
 
 function onSaved() {

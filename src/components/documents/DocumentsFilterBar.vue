@@ -10,6 +10,7 @@ import {
   Text,
   X,
 } from 'lucide-vue-next'
+import { apiFetch } from '@/lib/api-fetch'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -108,18 +109,22 @@ function toggleStatus(value: string) {
 }
 
 onMounted(async () => {
-  const [foldersRes, tagsRes] = await Promise.all([
-    fetch('/api/folders/all'),
-    fetch('/api/tags'),
-  ])
-  const foldersData = await foldersRes.json()
-  const tagsData = await tagsRes.json()
-  folders.value = foldersData.folders ?? []
-  tags.value = (tagsData.tags ?? []).map((t: any) => ({
-    id: t.id,
-    name: t.name,
-    color: t.color,
-  }))
+  try {
+    const [foldersRes, tagsRes] = await Promise.all([
+      apiFetch('/api/folders/all'),
+      apiFetch('/api/tags'),
+    ])
+    const foldersData = await foldersRes.json()
+    const tagsData = await tagsRes.json()
+    folders.value = foldersData.folders ?? []
+    tags.value = (tagsData.tags ?? []).map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      color: t.color,
+    }))
+  } catch (err) {
+    console.error('Filter-Daten laden fehlgeschlagen:', err)
+  }
 })
 </script>
 
@@ -147,6 +152,7 @@ onMounted(async () => {
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground'
                 "
+                :aria-pressed="searchMode === 'fulltext'"
                 @click="searchMode = 'fulltext'"
               >
                 <Text class="size-4" />
@@ -166,6 +172,7 @@ onMounted(async () => {
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground'
                 "
+                :aria-pressed="searchMode === 'semantic'"
                 @click="searchMode = 'semantic'"
               >
                 <Sparkles class="size-4" />

@@ -8,6 +8,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-vue-next'
+import { apiFetch } from '@/lib/api-fetch'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -59,12 +60,12 @@ async function fetchFolders() {
   loading.value = true
   try {
     const query = parentId.value ? `?parentId=${parentId.value}` : ''
-    const res = await fetch(`/api/folders${query}`)
+    const res = await apiFetch(`/api/folders${query}`)
     const data = await res.json()
     folders.value = data.folders
 
     if (parentId.value) {
-      const bcRes = await fetch(`/api/folders/${parentId.value}`)
+      const bcRes = await apiFetch(`/api/folders/${parentId.value}`)
       const bcData = await bcRes.json()
       breadcrumbs.value = bcData.breadcrumbs
     } else {
@@ -99,10 +100,22 @@ function openDelete(f: FolderRow) {
 
 async function confirmDelete() {
   if (!deleteFolder.value) return
-  await fetch(`/api/folders/${deleteFolder.value.id}`, { method: 'DELETE' })
-  deleteOpen.value = false
-  deleteFolder.value = null
-  await fetchFolders()
+  try {
+    const res = await apiFetch(`/api/folders/${deleteFolder.value.id}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      console.error('Ordner löschen fehlgeschlagen:', res.status)
+      window.alert('Fehler beim Löschen des Ordners.')
+      return
+    }
+    deleteOpen.value = false
+    deleteFolder.value = null
+    await fetchFolders()
+  } catch (err) {
+    console.error('Ordner löschen fehlgeschlagen:', err)
+    window.alert('Fehler beim Löschen des Ordners.')
+  }
 }
 
 function onSaved() {

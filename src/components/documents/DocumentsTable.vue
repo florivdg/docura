@@ -11,7 +11,9 @@ import {
   Loader2,
   SearchX,
 } from 'lucide-vue-next'
-import { formatFileSize } from '@/lib/format'
+import { formatFileSize, isImageMime } from '@/lib/format'
+import { statusConfig, stepLabels } from '@/lib/processing'
+import type { DocumentRow } from '@/composables/useDocumentsFilter'
 import {
   Table,
   TableBody,
@@ -30,26 +32,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-interface DocumentTag {
-  id: string
-  name: string
-  color: string | null
-}
-
-interface DocumentRow {
-  id: string
-  name: string
-  mimeType: string
-  fileSize: number
-  createdAt: string
-  updatedAt: string
-  folderName: string | null
-  tags: DocumentTag[]
-  processingStatus: string | null
-  processingStep: string | null
-  processingError: string | null
-}
-
 const props = defineProps<{
   documents: DocumentRow[]
   loading: boolean
@@ -65,29 +47,9 @@ function sortIcon(column: string) {
   return props.sortOrder === 'asc' ? ArrowUp : ArrowDown
 }
 
-const statusConfig: Record<
-  string,
-  {
-    variant: 'default' | 'secondary' | 'destructive' | 'outline'
-    label: string
-    class?: string
-  }
-> = {
-  pending: { variant: 'secondary', label: 'Ausstehend' },
-  processing: { variant: 'default', label: 'Verarbeitung' },
-  completed: {
-    variant: 'outline',
-    label: 'Abgeschlossen',
-    class: 'border-green-500/30 bg-green-500/10 text-green-400',
-  },
-  failed: { variant: 'destructive', label: 'Fehlgeschlagen' },
-}
-
-const stepLabels: Record<string, string> = {
-  text_extraction: 'Textextraktion',
-  ocr: 'Texterkennung',
-  llm_analysis: 'KI-Analyse',
-  embedding: 'Einbettung',
+function ariaSort(column: string): 'ascending' | 'descending' | 'none' {
+  if (props.sortColumn !== column) return 'none'
+  return props.sortOrder === 'asc' ? 'ascending' : 'descending'
 }
 
 const dateFormatter = new Intl.DateTimeFormat('de-DE', {
@@ -101,19 +63,16 @@ const dateFormatter = new Intl.DateTimeFormat('de-DE', {
 function formatDate(dateStr: string): string {
   return dateFormatter.format(new Date(dateStr))
 }
-
-function isImageMime(mime: string): boolean {
-  return mime.startsWith('image/')
-}
 </script>
 
 <template>
   <Table>
     <TableHeader>
       <TableRow>
-        <TableHead>
+        <TableHead :aria-sort="ariaSort('name')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            aria-label="Nach Name sortieren"
             @click="emit('sort', 'name')"
           >
             Name <component :is="sortIcon('name')" class="size-3.5" />
@@ -121,18 +80,20 @@ function isImageMime(mime: string): boolean {
         </TableHead>
         <TableHead>Ordner</TableHead>
         <TableHead>Tags</TableHead>
-        <TableHead>
+        <TableHead :aria-sort="ariaSort('fileSize')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            aria-label="Nach Größe sortieren"
             @click="emit('sort', 'fileSize')"
           >
             Größe <component :is="sortIcon('fileSize')" class="size-3.5" />
           </button>
         </TableHead>
         <TableHead>Status</TableHead>
-        <TableHead>
+        <TableHead :aria-sort="ariaSort('createdAt')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            aria-label="Nach Hochladedatum sortieren"
             @click="emit('sort', 'createdAt')"
           >
             Hochgeladen

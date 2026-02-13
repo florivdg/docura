@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { isImageMime } from '@/lib/format'
+import { statusConfig } from '@/lib/processing'
 
 interface RecentDocument {
   id: string
@@ -31,24 +33,6 @@ defineProps<{
   documents: RecentDocument[]
   loading: boolean
 }>()
-
-const statusConfig: Record<
-  string,
-  {
-    variant: 'default' | 'secondary' | 'destructive' | 'outline'
-    label: string
-    class?: string
-  }
-> = {
-  pending: { variant: 'secondary', label: 'Ausstehend' },
-  processing: { variant: 'default', label: 'Verarbeitung' },
-  completed: {
-    variant: 'outline',
-    label: 'Abgeschlossen',
-    class: 'border-green-500/30 bg-green-500/10 text-green-400',
-  },
-  failed: { variant: 'destructive', label: 'Fehlgeschlagen' },
-}
 
 const rtf = new Intl.RelativeTimeFormat('de-DE', { numeric: 'auto' })
 
@@ -67,10 +51,6 @@ function relativeTime(dateStr: string): string {
   const diffMonth = Math.round(diffDay / 30)
   if (Math.abs(diffMonth) < 12) return rtf.format(diffMonth, 'month')
   return rtf.format(Math.round(diffDay / 365), 'year')
-}
-
-function isImageMime(mime: string): boolean {
-  return mime.startsWith('image/')
 }
 </script>
 

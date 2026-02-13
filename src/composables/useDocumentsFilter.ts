@@ -1,18 +1,19 @@
 import { computed, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
+import { apiFetch } from '@/lib/api-fetch'
 
 type SortColumn = 'name' | 'fileSize' | 'createdAt'
 type SortOrder = 'asc' | 'desc'
 const VALID_SORT_COLUMNS: SortColumn[] = ['name', 'fileSize', 'createdAt']
 const VALID_PAGE_SIZES = [20, 50, 100] as const
 
-interface DocumentTag {
+export interface DocumentTag {
   id: string
   name: string
   color: string | null
 }
 
-interface DocumentRow {
+export interface DocumentRow {
   id: string
   name: string
   mimeType: string
@@ -77,6 +78,8 @@ export function useDocumentsFilter() {
   // Data
   const documents = ref<DocumentRow[]>([])
   const loading = ref(false)
+  let fetchController: AbortController | null = null
+  let clearingFilters = false
 
   // Computed
   const hasActiveFilters = computed(
@@ -109,6 +112,10 @@ export function useDocumentsFilter() {
   }
 
   async function fetchDocuments() {
+    fetchController?.abort()
+    const controller = new AbortController()
+    fetchController = controller
+
     loading.value = true
     try {
       const trimmedQuery = query.value.trim()
@@ -125,7 +132,7 @@ export function useDocumentsFilter() {
           : '/api/documents'
       }
 
-      const res = await fetch(url)
+      const res = await apiFetch(url, { signal: controller.signal })
       const data = await res.json()
 
       if (trimmedQuery) {
@@ -138,7 +145,8 @@ export function useDocumentsFilter() {
         currentPage.value = totalPages.value
         return fetchDocuments()
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       documents.value = []
     } finally {
       loading.value = false
@@ -146,6 +154,7 @@ export function useDocumentsFilter() {
   }
 
   function clearFilters() {
+    clearingFilters = true
     query.value = ''
     selectedFolderIds.value = []
     selectedTagIds.value = []
@@ -154,6 +163,8 @@ export function useDocumentsFilter() {
     sortOrder.value = 'desc'
     currentPage.value = 1
     pageSize.value = 20
+    clearingFilters = false
+    void fetchDocuments()
   }
 
   function toggleSort(column: SortColumn) {
@@ -181,12 +192,14 @@ export function useDocumentsFilter() {
 
   // Watch query with debounce
   watch(query, () => {
+    if (clearingFilters) return
     currentPage.value = 1
     void debouncedFetch()
   })
 
   // Watch searchMode - immediate fetch if query is present
   watch(searchMode, () => {
+    if (clearingFilters) return
     if (query.value.trim()) {
       currentPage.value = 1
       void fetchDocuments()
@@ -197,6 +210,7 @@ export function useDocumentsFilter() {
   watch(
     [selectedFolderIds, selectedTagIds, selectedStatuses],
     () => {
+      if (clearingFilters) return
       currentPage.value = 1
       void fetchDocuments()
     },
@@ -205,12 +219,14 @@ export function useDocumentsFilter() {
 
   // Watch sort changes
   watch([sortColumn, sortOrder], () => {
+    if (clearingFilters) return
     currentPage.value = 1
     void fetchDocuments()
   })
 
   // Watch pageSize changes
   watch(pageSize, () => {
+    if (clearingFilters) return
     currentPage.value = 1
     void fetchDocuments()
   })

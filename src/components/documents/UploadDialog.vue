@@ -175,6 +175,8 @@ async function uploadFile(uploadId: string) {
 
       <!-- Drop zone -->
       <div
+        role="button"
+        tabindex="0"
         class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 transition-colors"
         :class="
           isDragOver
@@ -185,6 +187,8 @@ async function uploadFile(uploadId: string) {
         @dragleave="onDragLeave"
         @drop.prevent="onDrop"
         @click="triggerFileInput"
+        @keydown.enter="triggerFileInput"
+        @keydown.space.prevent="triggerFileInput"
       >
         <FileUp class="text-muted-foreground size-8" />
         <p class="text-muted-foreground text-sm">

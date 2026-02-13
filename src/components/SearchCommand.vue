@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { FileText, FolderOpen, Loader2, Sparkles, Text } from 'lucide-vue-next'
-import { formatFileSize } from '@/lib/format'
+import { formatFileSize, sanitizeHeadline } from '@/lib/format'
+import { apiFetch } from '@/lib/api-fetch'
 import {
   CommandDialog,
   CommandEmpty,
@@ -33,6 +34,7 @@ interface SearchResult {
 }
 
 const results = ref<SearchResult[]>([])
+const searchController = ref<AbortController | null>(null)
 
 async function performSearch(query: string) {
   if (!query.trim()) {
@@ -40,6 +42,10 @@ async function performSearch(query: string) {
     errorMessage.value = ''
     return
   }
+
+  searchController.value?.abort()
+  const controller = new AbortController()
+  searchController.value = controller
 
   isLoading.value = true
   errorMessage.value = ''
@@ -50,7 +56,9 @@ async function performSearch(query: string) {
       mode: searchMode.value,
       limit: '10',
     })
-    const response = await fetch(`/api/documents/search?${params}`)
+    const response = await apiFetch(`/api/documents/search?${params}`, {
+      signal: controller.signal,
+    })
     const data = await response.json()
 
     if (!response.ok) {
@@ -60,7 +68,8 @@ async function performSearch(query: string) {
     }
 
     results.value = data.results
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return
     errorMessage.value = 'Verbindungsfehler'
     results.value = []
   } finally {
@@ -133,6 +142,7 @@ const hasQuery = computed(() => searchQuery.value.trim().length > 0)
             ? 'bg-primary text-primary-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
         ]"
+        :aria-pressed="searchMode === 'fulltext'"
         @click="searchMode = 'fulltext'"
       >
         <Text class="mr-1 inline size-3" />
@@ -145,6 +155,7 @@ const hasQuery = computed(() => searchQuery.value.trim().length > 0)
             ? 'bg-primary text-primary-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
         ]"
+        :aria-pressed="searchMode === 'semantic'"
         @click="searchMode = 'semantic'"
       >
         <Sparkles class="mr-1 inline size-3" />
@@ -202,7 +213,7 @@ const hasQuery = computed(() => searchQuery.value.trim().length > 0)
             <p
               v-if="result.headline"
               class="text-muted-foreground line-clamp-1 text-xs"
-              v-html="result.headline"
+              v-html="sanitizeHeadline(result.headline)"
             />
           </div>
         </CommandItem>

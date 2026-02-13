@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { AcceptableValue } from 'reka-ui'
 import { computed, onMounted, ref } from 'vue'
-import { formatFileSize } from '@/lib/format'
+import { formatFileSize, isImageMime } from '@/lib/format'
+import { apiFetch } from '@/lib/api-fetch'
+import { statusConfig, stepLabels } from '@/lib/processing'
 import { useProcessingEvents } from '@/composables/useProcessingEvents'
+import type { DocumentTag } from '@/composables/useDocumentsFilter'
 import {
   ArrowLeft,
   Download,
@@ -79,12 +82,6 @@ interface DocumentFolder {
   name: string
 }
 
-interface DocumentTag {
-  id: string
-  name: string
-  color: string | null
-}
-
 interface ProcessingJobData {
   id: string
   status: string
@@ -135,31 +132,6 @@ const allTags = ref<DocumentTag[]>([])
 const tagDialogOpen = ref(false)
 const fullscreenZoomed = ref(false)
 
-const statusConfig: Record<
-  string,
-  {
-    variant: 'default' | 'secondary' | 'destructive' | 'outline'
-    label: string
-    class?: string
-  }
-> = {
-  pending: { variant: 'secondary', label: 'Ausstehend' },
-  processing: { variant: 'default', label: 'Verarbeitung' },
-  completed: {
-    variant: 'outline',
-    label: 'Abgeschlossen',
-    class: 'border-green-500/30 bg-green-500/10 text-green-400',
-  },
-  failed: { variant: 'destructive', label: 'Fehlgeschlagen' },
-}
-
-const stepLabels: Record<string, string> = {
-  text_extraction: 'Textextraktion',
-  ocr: 'Texterkennung',
-  llm_analysis: 'KI-Analyse',
-  embedding: 'Einbettung',
-}
-
 const dateFormatter = new Intl.DateTimeFormat('de-DE', {
   day: '2-digit',
   month: '2-digit',
@@ -172,10 +144,6 @@ function formatDate(dateStr: string): string {
   return dateFormatter.format(new Date(dateStr))
 }
 
-function isImage(mime: string): boolean {
-  return mime.startsWith('image/')
-}
-
 function isPdf(mime: string): boolean {
   return mime === 'application/pdf'
 }
@@ -183,12 +151,18 @@ function isPdf(mime: string): boolean {
 async function handleDelete() {
   deleting.value = true
   try {
-    const res = await fetch(`/api/documents/${props.documentId}`, {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
       method: 'DELETE',
     })
     if (res.ok) {
       window.location.href = '/documents'
+    } else {
+      console.error('Dokument löschen fehlgeschlagen:', res.status)
+      window.alert('Fehler beim Löschen des Dokuments.')
     }
+  } catch (err) {
+    console.error('Dokument löschen fehlgeschlagen:', err)
+    window.alert('Fehler beim Löschen des Dokuments.')
   } finally {
     deleting.value = false
   }
@@ -215,7 +189,7 @@ async function handleFolderChange(value: AcceptableValue) {
     : null
 
   try {
-    const res = await fetch(`/api/documents/${props.documentId}`, {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folderId: newFolderId }),
@@ -247,7 +221,7 @@ async function handleTagToggle(tagId: string, checked: boolean) {
   }
 
   try {
-    const res = await fetch(`/api/documents/${props.documentId}`, {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tagIds: newTagIds }),
@@ -273,7 +247,7 @@ function isTagAssigned(tagId: string): boolean {
 
 async function fetchAllTags() {
   try {
-    const res = await fetch('/api/tags')
+    const res = await apiFetch('/api/tags')
     if (res.ok) {
       const data = await res.json()
       allTags.value = data.tags
@@ -296,9 +270,9 @@ async function handleTagCreated(tag: {
 onMounted(async () => {
   try {
     const [docRes, foldersRes, tagsRes] = await Promise.all([
-      fetch(`/api/documents/${props.documentId}`),
-      fetch('/api/folders/all'),
-      fetch('/api/tags'),
+      apiFetch(`/api/documents/${props.documentId}`),
+      apiFetch('/api/folders/all'),
+      apiFetch('/api/tags'),
     ])
 
     if (docRes.status === 404) {
@@ -331,7 +305,7 @@ onMounted(async () => {
 
 async function refetchDocument() {
   try {
-    const res = await fetch(`/api/documents/${props.documentId}`)
+    const res = await apiFetch(`/api/documents/${props.documentId}`)
     if (res.ok) {
       const data = await res.json()
       doc.value = data.document
@@ -489,7 +463,7 @@ useProcessingEvents(
           class="bg-muted/50 relative flex items-center justify-center overflow-hidden rounded-lg border"
         >
           <img
-            v-if="isImage(doc.mimeType)"
+            v-if="isImageMime(doc.mimeType)"
             :src="`/api/documents/${doc.id}/file`"
             :alt="doc.name"
             class="max-h-[600px] w-full object-contain p-4"
@@ -508,7 +482,7 @@ useProcessingEvents(
           </div>
 
           <!-- Fullscreen preview dialog -->
-          <Dialog v-if="isImage(doc.mimeType) || isPdf(doc.mimeType)">
+          <Dialog v-if="isImageMime(doc.mimeType) || isPdf(doc.mimeType)">
             <DialogTrigger as-child>
               <Button
                 variant="secondary"
@@ -533,7 +507,7 @@ useProcessingEvents(
                   >
                 </div>
                 <Button
-                  v-if="isImage(doc.mimeType)"
+                  v-if="isImageMime(doc.mimeType)"
                   variant="ghost"
                   size="icon"
                   class="size-8 shrink-0"
@@ -546,13 +520,13 @@ useProcessingEvents(
               <div
                 :class="[
                   'min-h-0 flex-1 p-4',
-                  fullscreenZoomed && isImage(doc.mimeType)
+                  fullscreenZoomed && isImageMime(doc.mimeType)
                     ? 'overflow-auto'
                     : 'flex items-center justify-center',
                 ]"
               >
                 <img
-                  v-if="isImage(doc.mimeType)"
+                  v-if="isImageMime(doc.mimeType)"
                   :src="`/api/documents/${doc.id}/file`"
                   :alt="doc.name"
                   :class="
