@@ -28,3 +28,6 @@ __pycache__/
 
 # uploaded documents
 uploads/
+
+# watch folder
+watch/

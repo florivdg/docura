@@ -2,6 +2,7 @@ import { WORKER_CONFIG } from '@/worker/config'
 import { claimNextJob } from '@/worker/pipeline/job-lifecycle'
 import { processJob } from '@/worker/process-job'
 import { assertDatabaseCompatibility } from '@/worker/utils/db-checks'
+import { startWatcher, stopWatcher } from '@/worker/watch'
 
 let shuttingDown = false
 
@@ -10,6 +11,7 @@ function registerShutdownHandlers() {
     if (shuttingDown) return
     shuttingDown = true
     console.log('Shutdown-Signal empfangen, Worker wird beendet...')
+    void stopWatcher()
   }
   process.on('SIGTERM', handler)
   process.on('SIGINT', handler)
@@ -45,6 +47,8 @@ export async function startWorker(
   console.log(`  OLLAMA_LLM_MODEL: ${WORKER_CONFIG.ollamaLlmModel}`)
   console.log(`  EMBEDDING_DIMENSIONS: ${WORKER_CONFIG.embeddingDimensions}`)
   console.log(`  WORKER_CONCURRENCY: ${concurrency}`)
+  console.log(`  WATCH_DIR: ${WORKER_CONFIG.watchDir}`)
+  console.log(`  WATCH_ENABLED: ${WORKER_CONFIG.watchEnabled}`)
 
   await assertDatabaseCompatibility()
   console.log(
@@ -52,6 +56,8 @@ export async function startWorker(
   )
 
   registerShutdownHandlers()
+
+  await startWatcher()
 
   const workers = Array.from({ length: concurrency }, (_, i) =>
     workerLoop(i + 1),
