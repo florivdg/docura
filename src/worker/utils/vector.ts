@@ -30,8 +30,6 @@ export function toPgVectorLiteral(vector: number[]): string {
 export function averageAndNormalizeVectors(vectors: number[][]): number[] {
   const dimensions = WORKER_CONFIG.embeddingDimensions
 
-  if (vectors.length === 1) return vectors[0]
-
   const finalVector = Array.from<number>({ length: dimensions }).fill(0)
   for (const vec of vectors) {
     for (let i = 0; i < dimensions; i++) {

@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { document } from '@/db/schema/documents'
 import { WORKER_CONFIG } from '@/worker/config'
-import { generateLlmResponse } from '@/worker/clients/ollama'
+import { chatWithOllama } from '@/worker/clients/ollama'
 import { updateStep } from '@/worker/pipeline/job-lifecycle'
 import { applyFolderSuggestion } from '@/worker/services/folder-service'
 import { loadExistingMetadata } from '@/worker/services/metadata-service'
@@ -36,7 +36,7 @@ async function analyzeLlm(
       ? existingFolders.map((f) => f.name).join(', ')
       : '(keine vorhanden)'
 
-  const prompt = `Du bist ein Dokumentenmanagement-Assistent. Analysiere den folgenden Dokumententext und extrahiere strukturierte Metadaten.
+  const systemPrompt = `Du bist ein Dokumentenmanagement-Assistent. Analysiere den vom Benutzer bereitgestellten Dokumententext und extrahiere strukturierte Metadaten.
 
 Aufgaben:
 1. Erstelle einen kurzen, prägnanten deutschen Titel (maximal 10 Wörter), der den Inhalt treffend beschreibt.
@@ -47,13 +47,10 @@ Vorhandene Tags: ${tagList}
 Vorhandene Ordner: ${folderList}
 
 Antworte ausschließlich mit validem JSON in diesem Format:
-{"title": "Der generierte Titel", "tags": ["Tag1", "Tag2"], "folderSuggestion": "Ordnername" oder null}
-
-Dokumententext:
-${truncatedText}`
+{"title": "Der generierte Titel", "tags": ["Tag1", "Tag2"], "folderSuggestion": "Ordnername" oder null}`
 
   try {
-    const responseText = await generateLlmResponse(prompt)
+    const responseText = await chatWithOllama(systemPrompt, truncatedText)
 
     let parsed: Record<string, unknown>
     try {
@@ -94,7 +91,7 @@ export async function runLlmAnalysis(
   }
 
   if (analysis.tags.length > 0) {
-    await applyTags(doc.id, analysis.tags)
+    await applyTags(doc.id, analysis.tags, true)
   }
 
   if (analysis.folderSuggestion) {

@@ -3,8 +3,20 @@ import { claimNextJob } from '@/worker/pipeline/job-lifecycle'
 import { processJob } from '@/worker/process-job'
 import { assertDatabaseCompatibility } from '@/worker/utils/db-checks'
 
+let shuttingDown = false
+
+function registerShutdownHandlers() {
+  const handler = () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    console.log('Shutdown-Signal empfangen, Worker wird beendet...')
+  }
+  process.on('SIGTERM', handler)
+  process.on('SIGINT', handler)
+}
+
 async function workerLoop(workerId: number) {
-  while (true) {
+  while (!shuttingDown) {
     try {
       const job = await claimNextJob()
       if (job) {
@@ -19,6 +31,7 @@ async function workerLoop(workerId: number) {
     }
     await Bun.sleep(WORKER_CONFIG.pollIntervalMs)
   }
+  console.log(`[Worker ${workerId}] beendet`)
 }
 
 export async function startWorker(
@@ -37,6 +50,8 @@ export async function startWorker(
   console.log(
     `  DB-Check: OK (public.document.embedding = vector(${WORKER_CONFIG.embeddingDimensions}))`,
   )
+
+  registerShutdownHandlers()
 
   const workers = Array.from({ length: concurrency }, (_, i) =>
     workerLoop(i + 1),

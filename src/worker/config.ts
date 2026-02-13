@@ -5,6 +5,7 @@ export const WORKER_CONFIG = {
   ollamaEmbedModel: process.env.OLLAMA_EMBED_MODEL || 'mxbai-embed-large',
   ollamaLlmModel: process.env.OLLAMA_LLM_MODEL || 'llama3',
   ocrServiceUrl: process.env.OCR_SERVICE_URL || 'http://localhost:8100',
+  redisUrl: process.env.REDIS_URL,
   embeddingDimensions: 1024,
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || '2'),
   ocrTimeoutMs: 120_000,

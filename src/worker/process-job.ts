@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import path from 'node:path'
 
 import { eq } from 'drizzle-orm'
 
 import { db } from '@/db'
-import { document, processingJob } from '@/db/schema/documents'
+import { document } from '@/db/schema/documents'
 import { WORKER_CONFIG } from '@/worker/config'
 import { markCompleted, markFailed } from '@/worker/pipeline/job-lifecycle'
 import { generateAndStoreEmbedding } from '@/worker/pipeline/embedding'
@@ -16,14 +16,8 @@ import type { ProcessingJobRecord } from '@/worker/types'
 export async function processJob(job: ProcessingJobRecord) {
   const jobId = job.id
   const documentId = job.document_id
-  const attempts = (job.attempts ?? 0) + 1
+  const attempts = job.attempts
   const maxAttempts = job.max_attempts ?? 3
-
-  // Increment attempts
-  await db
-    .update(processingJob)
-    .set({ attempts, updatedAt: new Date() })
-    .where(eq(processingJob.id, jobId))
 
   try {
     // Fetch document
@@ -43,7 +37,21 @@ export async function processJob(job: ProcessingJobRecord) {
       return
     }
 
-    const filePath = join(WORKER_CONFIG.uploadDir, doc.storagePath)
+    const filePath = path.resolve(WORKER_CONFIG.uploadDir, doc.storagePath)
+    const uploadBase = path.resolve(WORKER_CONFIG.uploadDir)
+    if (
+      !filePath.startsWith(uploadBase + path.sep) &&
+      filePath !== uploadBase
+    ) {
+      await markFailed(
+        jobId,
+        documentId,
+        `Ungültiger Dateipfad: ${doc.storagePath}`,
+        maxAttempts,
+        maxAttempts,
+      )
+      return
+    }
     const fileBuffer = await readFile(filePath)
 
     // Text extraction

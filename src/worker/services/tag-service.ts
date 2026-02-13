@@ -5,6 +5,7 @@ import { documentTag, tag } from '@/db/schema/documents'
 
 export async function findOrCreateTag(
   tagName: string,
+  onlyExisting = false,
 ): Promise<{ id: string } | null> {
   const lowerName = tagName.trim().toLowerCase()
 
@@ -16,6 +17,8 @@ export async function findOrCreateTag(
     .limit(1)
 
   if (existing.length > 0) return existing[0]
+
+  if (onlyExisting) return null
 
   // Create new tag
   try {
@@ -38,11 +41,15 @@ export async function findOrCreateTag(
   }
 }
 
-export async function applyTags(documentId: string, tagNames: string[]) {
+export async function applyTags(
+  documentId: string,
+  tagNames: string[],
+  onlyExisting = false,
+) {
   try {
     const tagIds: string[] = []
     for (const name of tagNames) {
-      const result = await findOrCreateTag(name)
+      const result = await findOrCreateTag(name, onlyExisting)
       if (result) tagIds.push(result.id)
     }
 

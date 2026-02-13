@@ -27,6 +27,38 @@ export async function generateLlmResponse(prompt: string): Promise<string> {
   return raw.response
 }
 
+export async function chatWithOllama(
+  system: string,
+  user: string,
+): Promise<string> {
+  const response = await fetchWithTimeout(
+    `${WORKER_CONFIG.ollamaUrl}/api/chat`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: WORKER_CONFIG.ollamaLlmModel,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        stream: false,
+        format: 'json',
+      }),
+    },
+    WORKER_CONFIG.ollamaTimeoutMs,
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `LLM-Anfrage fehlgeschlagen: ${response.status} ${response.statusText}`,
+    )
+  }
+
+  const raw = (await response.json()) as { message: { content: string } }
+  return raw.message.content
+}
+
 export async function generateEmbedding(input: string): Promise<number[][]> {
   const response = await fetchWithTimeout(
     `${WORKER_CONFIG.ollamaUrl}/api/embed`,

@@ -8,7 +8,7 @@ import { notifyProcessingUpdate } from '@/worker/notify'
 export async function claimNextJob(): Promise<ProcessingJobRecord | null> {
   const rows = await db.execute(sql`
     UPDATE processing_job
-    SET status = 'processing', started_at = NOW(), updated_at = NOW()
+    SET status = 'processing', attempts = attempts + 1, started_at = NOW(), updated_at = NOW()
     WHERE id = (
       SELECT id FROM processing_job
       WHERE (status = 'pending')
