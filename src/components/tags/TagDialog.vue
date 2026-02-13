@@ -41,13 +41,17 @@ const presetColors = [
   { name: 'Schiefer', value: '#64748b' },
 ]
 
-watch(open, (val) => {
-  if (val) {
-    name.value = props.mode === 'edit' && props.tag ? props.tag.name : ''
-    color.value = props.mode === 'edit' && props.tag ? props.tag.color : null
-    error.value = ''
-  }
-})
+watch(
+  open,
+  (val) => {
+    if (val) {
+      name.value = props.mode === 'edit' && props.tag ? props.tag.name : ''
+      color.value = props.mode === 'edit' && props.tag ? props.tag.color : null
+      error.value = ''
+    }
+  },
+  { immediate: true },
+)
 
 function selectColor(c: string | null) {
   color.value = c

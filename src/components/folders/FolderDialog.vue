@@ -25,12 +25,17 @@ const name = ref('')
 const saving = ref(false)
 const error = ref('')
 
-watch(open, (val) => {
-  if (val) {
-    name.value = props.mode === 'edit' && props.folder ? props.folder.name : ''
-    error.value = ''
-  }
-})
+watch(
+  open,
+  (val) => {
+    if (val) {
+      name.value =
+        props.mode === 'edit' && props.folder ? props.folder.name : ''
+      error.value = ''
+    }
+  },
+  { immediate: true },
+)
 
 async function submit() {
   if (!name.value.trim()) {
