@@ -9,6 +9,8 @@ import {
   tag,
 } from '@/db/schema/documents'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { isValidUUID, VALID_STATUSES } from '@/lib/api-utils'
+import { latestJobPerDoc } from '@/db/queries'
 
 export const GET: APIRoute = async ({ url }) => {
   const folderIds =
@@ -17,6 +19,27 @@ export const GET: APIRoute = async ({ url }) => {
     url.searchParams.get('tagIds')?.split(',').filter(Boolean) ?? []
   const statuses =
     url.searchParams.get('status')?.split(',').filter(Boolean) ?? []
+
+  if (folderIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Ordner-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (tagIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Tag-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (statuses.some((s) => !VALID_STATUSES.has(s))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültiger Status in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
 
   const SORT_COLUMNS = ['name', 'fileSize', 'createdAt'] as const
   type SortColumn = (typeof SORT_COLUMNS)[number]
@@ -59,16 +82,7 @@ export const GET: APIRoute = async ({ url }) => {
       inArray(sql`coalesce(${processingJob.status}, 'pending')`, statuses),
     )
   }
-  const latestJobPerDoc = db
-    .select({
-      documentId: processingJob.documentId,
-      maxCreatedAt: sql<Date>`max(${processingJob.createdAt})`.as(
-        'max_created_at',
-      ),
-    })
-    .from(processingJob)
-    .groupBy(processingJob.documentId)
-    .as('latest_job')
+  const latestJob = latestJobPerDoc()
 
   const sortColumnMap = {
     name: document.name,
@@ -83,10 +97,10 @@ export const GET: APIRoute = async ({ url }) => {
   const countResult = await db
     .select({ count: sql<number>`count(*)` })
     .from(document)
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(conditions.length > 0 ? and(...conditions) : undefined)
   const total = Number(countResult[0]?.count ?? 0)
@@ -106,10 +120,10 @@ export const GET: APIRoute = async ({ url }) => {
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(orderByExpr)

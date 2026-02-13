@@ -11,6 +11,8 @@ import {
   tag,
 } from '@/db/schema/documents'
 import { generateEmbedding } from '@/worker/clients/ollama'
+import { isValidUUID, VALID_STATUSES } from '@/lib/api-utils'
+import { latestJobPerDoc } from '@/db/queries'
 
 interface FilterParams {
   folderIds: string[]
@@ -58,6 +60,28 @@ export const GET: APIRoute = async ({ url }) => {
     url.searchParams.get('tagIds')?.split(',').filter(Boolean) ?? []
   const statuses =
     url.searchParams.get('status')?.split(',').filter(Boolean) ?? []
+
+  if (folderIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Ordner-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (tagIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Tag-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (statuses.some((s) => !VALID_STATUSES.has(s))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültiger Status in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
   const filterParams: FilterParams = { folderIds, tagIds, statuses }
 
   if (!query) {
@@ -97,6 +121,87 @@ function escapeLikePattern(input: string): string {
   return input.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
+function buildFilterConditions(filterParams: FilterParams): SQL[] {
+  const conditions: SQL[] = []
+
+  if (filterParams.folderIds.length > 0) {
+    conditions.push(inArray(document.folderId, filterParams.folderIds))
+  }
+
+  if (filterParams.tagIds.length > 0) {
+    const docIdsWithTags = db
+      .select({ documentId: documentTag.documentId })
+      .from(documentTag)
+      .where(inArray(documentTag.tagId, filterParams.tagIds))
+    conditions.push(inArray(document.id, docIdsWithTags))
+  }
+
+  if (filterParams.statuses.length > 0) {
+    conditions.push(
+      inArray(
+        sql`coalesce(${processingJob.status}, 'pending')`,
+        filterParams.statuses,
+      ),
+    )
+  }
+
+  return conditions
+}
+
+async function loadTagsForDocuments(
+  docIds: string[],
+): Promise<Map<string, { id: string; name: string; color: string | null }[]>> {
+  const tagsByDoc = new Map<
+    string,
+    { id: string; name: string; color: string | null }[]
+  >()
+
+  if (docIds.length === 0) return tagsByDoc
+
+  const tagRows = await db
+    .select({
+      documentId: documentTag.documentId,
+      tagId: tag.id,
+      tagName: tag.name,
+      tagColor: tag.color,
+    })
+    .from(documentTag)
+    .innerJoin(tag, eq(documentTag.tagId, tag.id))
+    .where(inArray(documentTag.documentId, docIds))
+
+  for (const r of tagRows) {
+    const list = tagsByDoc.get(r.documentId) ?? []
+    list.push({ id: r.tagId, name: r.tagName, color: r.tagColor })
+    tagsByDoc.set(r.documentId, list)
+  }
+
+  return tagsByDoc
+}
+
+function buildSearchResponse(
+  rows: Record<string, any>[],
+  tagsByDoc: Map<string, { id: string; name: string; color: string | null }[]>,
+  total: number,
+  pagination: PaginationParams,
+) {
+  const results = rows.map((r) => ({
+    ...r,
+    tags: tagsByDoc.get(r.id as string) ?? [],
+  }))
+
+  return new Response(
+    JSON.stringify({
+      results,
+      total,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+    }),
+    {
+      headers: { 'Content-Type': 'application/json' },
+    },
+  )
+}
+
 async function handleFulltextSearch(
   query: string,
   pagination: PaginationParams,
@@ -128,39 +233,17 @@ async function handleFulltextSearch(
   const nameIlike = sql`${document.name} ILIKE ${likePattern}`
   const fuzzyName = sql`similarity(${document.name}, ${query}) > 0.3`
 
-  const conditions = [nameIlike, fuzzyName]
+  const searchConditions = [nameIlike, fuzzyName]
 
   if (prefixTsq) {
     const tsQuery = sql`to_tsquery('german', ${prefixTsq})`
-    conditions.push(sql`${tsVector} @@ ${tsQuery}`)
+    searchConditions.push(sql`${tsVector} @@ ${tsQuery}`)
   }
   if (useContentIlike) {
-    conditions.push(sql`${document.textContent} ILIKE ${likePattern}`)
+    searchConditions.push(sql`${document.textContent} ILIKE ${likePattern}`)
   }
 
-  // Build filter conditions
-  const filterConditions: SQL[] = []
-
-  if (filterParams.folderIds.length > 0) {
-    filterConditions.push(inArray(document.folderId, filterParams.folderIds))
-  }
-
-  if (filterParams.tagIds.length > 0) {
-    const docIdsWithTags = db
-      .select({ documentId: documentTag.documentId })
-      .from(documentTag)
-      .where(inArray(documentTag.tagId, filterParams.tagIds))
-    filterConditions.push(inArray(document.id, docIdsWithTags))
-  }
-
-  if (filterParams.statuses.length > 0) {
-    filterConditions.push(
-      inArray(
-        sql`coalesce(${processingJob.status}, 'pending')`,
-        filterParams.statuses,
-      ),
-    )
-  }
+  const filterConditions = buildFilterConditions(filterParams)
 
   // Build relevance score
   const scoreFragments = [
@@ -218,22 +301,12 @@ async function handleFulltextSearch(
     headlineSql = sql<string>`NULL`.as('headline')
   }
 
-  // Subquery for latest processing job per document
-  const latestJobPerDoc = db
-    .select({
-      documentId: processingJob.documentId,
-      maxCreatedAt: sql<Date>`max(${processingJob.createdAt})`.as(
-        'max_created_at',
-      ),
-    })
-    .from(processingJob)
-    .groupBy(processingJob.documentId)
-    .as('latest_job')
+  const latestJob = latestJobPerDoc()
 
   const whereClause =
     filterConditions.length > 0
-      ? and(or(...conditions), ...filterConditions)
-      : or(...conditions)
+      ? and(or(...searchConditions), ...filterConditions)
+      : or(...searchConditions)
 
   const sortColumnMap = {
     name: document.name,
@@ -245,10 +318,10 @@ async function handleFulltextSearch(
     .select({ count: sql<number>`count(*)` })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(whereClause)
   const total = Number(countResult[0]?.count ?? 0)
@@ -270,10 +343,10 @@ async function handleFulltextSearch(
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(whereClause)
     .orderBy(
@@ -286,48 +359,9 @@ async function handleFulltextSearch(
     .limit(pagination.pageSize)
     .offset(pagination.offset)
 
-  // Fetch tags for result documents
-  const docIds = rows.map((r) => r.id)
-  const tagRows =
-    docIds.length > 0
-      ? await db
-          .select({
-            documentId: documentTag.documentId,
-            tagId: tag.id,
-            tagName: tag.name,
-            tagColor: tag.color,
-          })
-          .from(documentTag)
-          .innerJoin(tag, eq(documentTag.tagId, tag.id))
-          .where(inArray(documentTag.documentId, docIds))
-      : []
+  const tagsByDoc = await loadTagsForDocuments(rows.map((r) => r.id))
 
-  const tagsByDoc = new Map<
-    string,
-    { id: string; name: string; color: string | null }[]
-  >()
-  for (const r of tagRows) {
-    const list = tagsByDoc.get(r.documentId) ?? []
-    list.push({ id: r.tagId, name: r.tagName, color: r.tagColor })
-    tagsByDoc.set(r.documentId, list)
-  }
-
-  const results = rows.map((r) => ({
-    ...r,
-    tags: tagsByDoc.get(r.id) ?? [],
-  }))
-
-  return new Response(
-    JSON.stringify({
-      results,
-      total,
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    },
-  )
+  return buildSearchResponse(rows, tagsByDoc, total, pagination)
 }
 
 async function handleSemanticSearch(
@@ -353,41 +387,12 @@ async function handleSemanticSearch(
 
   const vectorLiteral = `[${queryVector.join(',')}]`
 
-  // Build filter conditions
-  const filterConditions: SQL[] = [isNotNull(document.embedding)]
+  const filterConditions: SQL[] = [
+    isNotNull(document.embedding),
+    ...buildFilterConditions(filterParams),
+  ]
 
-  if (filterParams.folderIds.length > 0) {
-    filterConditions.push(inArray(document.folderId, filterParams.folderIds))
-  }
-
-  if (filterParams.tagIds.length > 0) {
-    const docIdsWithTags = db
-      .select({ documentId: documentTag.documentId })
-      .from(documentTag)
-      .where(inArray(documentTag.tagId, filterParams.tagIds))
-    filterConditions.push(inArray(document.id, docIdsWithTags))
-  }
-
-  if (filterParams.statuses.length > 0) {
-    filterConditions.push(
-      inArray(
-        sql`coalesce(${processingJob.status}, 'pending')`,
-        filterParams.statuses,
-      ),
-    )
-  }
-
-  // Subquery for latest processing job per document
-  const latestJobPerDoc = db
-    .select({
-      documentId: processingJob.documentId,
-      maxCreatedAt: sql<Date>`max(${processingJob.createdAt})`.as(
-        'max_created_at',
-      ),
-    })
-    .from(processingJob)
-    .groupBy(processingJob.documentId)
-    .as('latest_job')
+  const latestJob = latestJobPerDoc()
 
   const sortColumnMap = {
     name: document.name,
@@ -399,10 +404,10 @@ async function handleSemanticSearch(
     .select({ count: sql<number>`count(*)` })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(and(...filterConditions))
   const total = Number(countResult[0]?.count ?? 0)
@@ -426,10 +431,10 @@ async function handleSemanticSearch(
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(latestJobPerDoc, eq(document.id, latestJobPerDoc.documentId))
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
-      sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
+      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
     )
     .where(and(...filterConditions))
     .orderBy(
@@ -442,46 +447,7 @@ async function handleSemanticSearch(
     .limit(pagination.pageSize)
     .offset(pagination.offset)
 
-  // Fetch tags for result documents
-  const docIds = rows.map((r) => r.id)
-  const tagRows =
-    docIds.length > 0
-      ? await db
-          .select({
-            documentId: documentTag.documentId,
-            tagId: tag.id,
-            tagName: tag.name,
-            tagColor: tag.color,
-          })
-          .from(documentTag)
-          .innerJoin(tag, eq(documentTag.tagId, tag.id))
-          .where(inArray(documentTag.documentId, docIds))
-      : []
+  const tagsByDoc = await loadTagsForDocuments(rows.map((r) => r.id))
 
-  const tagsByDoc = new Map<
-    string,
-    { id: string; name: string; color: string | null }[]
-  >()
-  for (const r of tagRows) {
-    const list = tagsByDoc.get(r.documentId) ?? []
-    list.push({ id: r.tagId, name: r.tagName, color: r.tagColor })
-    tagsByDoc.set(r.documentId, list)
-  }
-
-  const results = rows.map((r) => ({
-    ...r,
-    tags: tagsByDoc.get(r.id) ?? [],
-  }))
-
-  return new Response(
-    JSON.stringify({
-      results,
-      total,
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    },
-  )
+  return buildSearchResponse(rows, tagsByDoc, total, pagination)
 }

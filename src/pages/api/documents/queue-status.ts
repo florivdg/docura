@@ -2,9 +2,17 @@ import type { APIRoute } from 'astro'
 import { eq, desc } from 'drizzle-orm'
 import { db } from '@/db'
 import { processingJob } from '@/db/schema/documents'
+import { isValidUUID } from '@/lib/api-utils'
 
 export const GET: APIRoute = async ({ url }) => {
   const documentId = url.searchParams.get('documentId')
+
+  if (documentId && !isValidUUID(documentId)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   let jobs
   if (documentId) {

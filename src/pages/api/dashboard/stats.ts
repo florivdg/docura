@@ -2,8 +2,11 @@ import type { APIRoute } from 'astro'
 import { db } from '@/db'
 import { document, folder, processingJob, tag } from '@/db/schema/documents'
 import { count, desc, eq, sql, sum } from 'drizzle-orm'
+import { latestJobPerDoc } from '@/db/queries'
 
 export const GET: APIRoute = async () => {
+  const latestJob = latestJobPerDoc()
+
   const [docStats, folderStats, tagStats, recentDocs, typeBreakdown] =
     await Promise.all([
       db
@@ -25,41 +28,25 @@ export const GET: APIRoute = async () => {
         .then((r) => r[0]!),
 
       // Recent 10 documents with latest processing status
-      (() => {
-        const latestJobPerDoc = db
-          .select({
-            documentId: processingJob.documentId,
-            maxCreatedAt: sql<Date>`max(${processingJob.createdAt})`.as(
-              'max_created_at',
-            ),
-          })
-          .from(processingJob)
-          .groupBy(processingJob.documentId)
-          .as('latest_job')
-
-        return db
-          .select({
-            id: document.id,
-            name: document.name,
-            mimeType: document.mimeType,
-            fileSize: document.fileSize,
-            createdAt: document.createdAt,
-            folderName: folder.name,
-            processingStatus: processingJob.status,
-          })
-          .from(document)
-          .leftJoin(folder, eq(document.folderId, folder.id))
-          .leftJoin(
-            latestJobPerDoc,
-            eq(document.id, latestJobPerDoc.documentId),
-          )
-          .leftJoin(
-            processingJob,
-            sql`${processingJob.documentId} = ${latestJobPerDoc.documentId} AND ${processingJob.createdAt} = ${latestJobPerDoc.maxCreatedAt}`,
-          )
-          .orderBy(desc(document.createdAt))
-          .limit(10)
-      })(),
+      db
+        .select({
+          id: document.id,
+          name: document.name,
+          mimeType: document.mimeType,
+          fileSize: document.fileSize,
+          createdAt: document.createdAt,
+          folderName: folder.name,
+          processingStatus: processingJob.status,
+        })
+        .from(document)
+        .leftJoin(folder, eq(document.folderId, folder.id))
+        .leftJoin(latestJob, eq(document.id, latestJob.documentId))
+        .leftJoin(
+          processingJob,
+          sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
+        )
+        .orderBy(desc(document.createdAt))
+        .limit(10),
 
       // Documents grouped by MIME type
       db

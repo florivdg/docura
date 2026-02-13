@@ -31,7 +31,15 @@ export const GET: APIRoute = async () => {
 }
 
 export const POST: APIRoute = async ({ request }) => {
-  const body = await request.json()
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return new Response(JSON.stringify({ error: 'Ungültiger JSON-Body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
   const { name, color } = body
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {

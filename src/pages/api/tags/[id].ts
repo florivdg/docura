@@ -2,12 +2,29 @@ import type { APIRoute } from 'astro'
 import { db } from '@/db'
 import { tag } from '@/db/schema/documents'
 import { eq, and, ne } from 'drizzle-orm'
+import { isValidUUID } from '@/lib/api-utils'
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const { id } = params
-  const body = await request.json()
 
-  const [existing] = await db.select().from(tag).where(eq(tag.id, id!)).limit(1)
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Tag-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return new Response(JSON.stringify({ error: 'Ungültiger JSON-Body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const [existing] = await db.select().from(tag).where(eq(tag.id, id)).limit(1)
 
   if (!existing) {
     return new Response(JSON.stringify({ error: 'Tag nicht gefunden' }), {
@@ -29,7 +46,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     const [duplicate] = await db
       .select({ id: tag.id })
       .from(tag)
-      .where(and(eq(tag.name, body.name.trim()), ne(tag.id, id!)))
+      .where(and(eq(tag.name, body.name.trim()), ne(tag.id, id)))
       .limit(1)
 
     if (duplicate) {
@@ -57,7 +74,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   const [updated] = await db
     .update(tag)
     .set(updates)
-    .where(eq(tag.id, id!))
+    .where(eq(tag.id, id))
     .returning()
 
   return new Response(JSON.stringify({ tag: updated }), {
@@ -68,10 +85,17 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 export const DELETE: APIRoute = async ({ params }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Tag-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [existing] = await db
     .select({ id: tag.id })
     .from(tag)
-    .where(eq(tag.id, id!))
+    .where(eq(tag.id, id))
     .limit(1)
 
   if (!existing) {
@@ -81,7 +105,7 @@ export const DELETE: APIRoute = async ({ params }) => {
     })
   }
 
-  await db.delete(tag).where(eq(tag.id, id!))
+  await db.delete(tag).where(eq(tag.id, id))
 
   return new Response(null, { status: 204 })
 }

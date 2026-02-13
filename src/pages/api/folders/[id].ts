@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro'
 import { db } from '@/db'
 import { folder } from '@/db/schema/documents'
 import { eq } from 'drizzle-orm'
+import { isValidUUID } from '@/lib/api-utils'
 
 async function buildBreadcrumbs(
   folderId: string,
@@ -27,10 +28,17 @@ async function buildBreadcrumbs(
 export const GET: APIRoute = async ({ params }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [found] = await db
     .select()
     .from(folder)
-    .where(eq(folder.id, id!))
+    .where(eq(folder.id, id))
     .limit(1)
 
   if (!found) {
@@ -49,12 +57,28 @@ export const GET: APIRoute = async ({ params }) => {
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const { id } = params
-  const body = await request.json()
+
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return new Response(JSON.stringify({ error: 'Ungültiger JSON-Body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   const [existing] = await db
     .select()
     .from(folder)
-    .where(eq(folder.id, id!))
+    .where(eq(folder.id, id))
     .limit(1)
 
   if (!existing) {
@@ -120,7 +144,7 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   const [updated] = await db
     .update(folder)
     .set(updates)
-    .where(eq(folder.id, id!))
+    .where(eq(folder.id, id))
     .returning()
 
   return new Response(JSON.stringify({ folder: updated }), {
@@ -131,10 +155,17 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 export const DELETE: APIRoute = async ({ params }) => {
   const { id } = params
 
+  if (!id || !isValidUUID(id)) {
+    return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const [existing] = await db
     .select({ id: folder.id })
     .from(folder)
-    .where(eq(folder.id, id!))
+    .where(eq(folder.id, id))
     .limit(1)
 
   if (!existing) {
@@ -144,7 +175,7 @@ export const DELETE: APIRoute = async ({ params }) => {
     })
   }
 
-  await db.delete(folder).where(eq(folder.id, id!))
+  await db.delete(folder).where(eq(folder.id, id))
 
   return new Response(null, { status: 204 })
 }
