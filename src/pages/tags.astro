@@ -1,20 +1,8 @@
 ---
-import '@/styles/global.css'
+import AppLayout from '@/layouts/AppLayout.astro'
 import TagsPage from '@/components/TagsPage.vue'
 ---
 
-<html lang="de" class="dark">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="generator" content={Astro.generator} />
-    <title>Tags - Docura</title>
-  </head>
-  <body>
-    <div class="[--header-height:3.5rem] [--sidebar-width:19rem]" id="app-root">
-      <TagsPage client:only="vue" />
-    </div>
-  </body>
-</html>
+<AppLayout title="Tags - Docura">
+  <TagsPage client:only="vue" />
+</AppLayout>

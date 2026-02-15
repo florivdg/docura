@@ -1,20 +1,8 @@
 ---
-import '@/styles/global.css'
+import AuthLayout from '@/layouts/AuthLayout.astro'
 import LoginForm from '@/components/LoginForm.vue'
 ---
 
-<html lang="de" class="dark">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="generator" content={Astro.generator} />
-    <title>Anmelden - Docura</title>
-  </head>
-  <body>
-    <div class="flex min-h-svh items-center justify-center p-6">
-      <LoginForm client:only="vue" class="w-full max-w-sm" />
-    </div>
-  </body>
-</html>
+<AuthLayout title="Anmelden - Docura">
+  <LoginForm client:only="vue" class="w-full max-w-sm" />
+</AuthLayout>
