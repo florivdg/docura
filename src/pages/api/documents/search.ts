@@ -12,14 +12,16 @@ import {
 } from '@/db/schema/documents'
 import { generateEmbedding } from '@/worker/clients/ollama'
 import { isValidUUID, VALID_STATUSES } from '@/lib/api-utils'
-import { latestJobPerDoc } from '@/db/queries'
+import { latestJobPerDoc, viewConditions } from '@/db/queries'
 
 interface FilterParams {
   folderIds: string[]
   tagIds: string[]
   statuses: string[]
+  view: string
 }
 
+const VALID_VIEWS = new Set(['all', 'favorites', 'trash', 'archive'])
 const SORT_COLUMNS = ['name', 'fileSize', 'createdAt'] as const
 type SortColumn = (typeof SORT_COLUMNS)[number]
 const PAGE_SIZES = [20, 50, 100] as const
@@ -82,7 +84,14 @@ export const GET: APIRoute = async ({ url }) => {
     )
   }
 
-  const filterParams: FilterParams = { folderIds, tagIds, statuses }
+  const view = url.searchParams.get('view') ?? 'all'
+  if (!VALID_VIEWS.has(view)) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültiger View-Parameter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+  const filterParams: FilterParams = { folderIds, tagIds, statuses, view }
 
   if (!query) {
     return new Response(
@@ -122,7 +131,7 @@ function escapeLikePattern(input: string): string {
 }
 
 function buildFilterConditions(filterParams: FilterParams): SQL[] {
-  const conditions: SQL[] = []
+  const conditions: SQL[] = [...viewConditions(filterParams.view)]
 
   if (filterParams.folderIds.length > 0) {
     conditions.push(inArray(document.folderId, filterParams.folderIds))
@@ -340,6 +349,9 @@ async function handleFulltextSearch(
       processingStatus: processingJob.status,
       processingStep: processingJob.step,
       processingError: processingJob.errorMessage,
+      isFavorite: document.isFavorite,
+      archivedAt: document.archivedAt,
+      trashedAt: document.trashedAt,
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
@@ -428,6 +440,9 @@ async function handleSemanticSearch(
       processingStatus: processingJob.status,
       processingStep: processingJob.step,
       processingError: processingJob.errorMessage,
+      isFavorite: document.isFavorite,
+      archivedAt: document.archivedAt,
+      trashedAt: document.trashedAt,
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))

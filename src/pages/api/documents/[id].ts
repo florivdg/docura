@@ -77,6 +77,9 @@ export const GET: APIRoute = async ({ params }) => {
         name: doc.name,
         mimeType: doc.mimeType,
         fileSize: doc.fileSize,
+        isFavorite: doc.isFavorite,
+        archivedAt: doc.archivedAt,
+        trashedAt: doc.trashedAt,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
         textContent: doc.textContent,
@@ -89,8 +92,9 @@ export const GET: APIRoute = async ({ params }) => {
   )
 }
 
-export const DELETE: APIRoute = async ({ params }) => {
+export const DELETE: APIRoute = async ({ params, url }) => {
   const { id } = params
+  const permanent = url.searchParams.get('permanent') === 'true'
 
   if (!id || !isValidUUID(id)) {
     return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
@@ -100,7 +104,11 @@ export const DELETE: APIRoute = async ({ params }) => {
   }
 
   const [doc] = await db
-    .select({ id: document.id, storagePath: document.storagePath })
+    .select({
+      id: document.id,
+      storagePath: document.storagePath,
+      trashedAt: document.trashedAt,
+    })
     .from(document)
     .where(eq(document.id, id))
     .limit(1)
@@ -112,15 +120,46 @@ export const DELETE: APIRoute = async ({ params }) => {
     })
   }
 
-  const uploadDir = process.env.UPLOAD_DIR || './uploads'
-  try {
-    const filePath = safePath(uploadDir, doc.storagePath)
-    await unlink(filePath)
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') throw err
+  if (permanent) {
+    if (!doc.trashedAt) {
+      return new Response(
+        JSON.stringify({
+          error: 'Endgültiges Löschen nur für Dokumente im Papierkorb erlaubt',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+
+    const uploadDir = process.env.UPLOAD_DIR || './uploads'
+    try {
+      const filePath = safePath(uploadDir, doc.storagePath)
+      await unlink(filePath)
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') throw err
+    }
+
+    await db.delete(document).where(eq(document.id, id))
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
-  await db.delete(document).where(eq(document.id, id))
+  // Guard: don't re-trash already-trashed documents
+  if (doc.trashedAt) {
+    return new Response(
+      JSON.stringify({
+        error: 'Dokument befindet sich bereits im Papierkorb',
+      }),
+      { status: 409, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  // Soft delete: set trashedAt
+  await db
+    .update(document)
+    .set({ trashedAt: new Date() })
+    .where(eq(document.id, id))
 
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' },
@@ -150,7 +189,14 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     })
   }
 
-  let body: { folderId?: string | null; tagIds?: string[]; name?: string }
+  let body: {
+    folderId?: string | null
+    tagIds?: string[]
+    name?: string
+    isFavorite?: boolean
+    trashedAt?: string | null
+    archivedAt?: string | null
+  }
   try {
     body = await parseJsonBody<typeof body>(request)
   } catch (err) {
@@ -232,19 +278,25 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     }
   }
 
-  await db.transaction(async (tx) => {
-    if ('name' in body) {
-      await tx
-        .update(document)
-        .set({ name: body.name!.trim() })
-        .where(eq(document.id, id))
-    }
+  if ('isFavorite' in body && typeof body.isFavorite !== 'boolean') {
+    return new Response(
+      JSON.stringify({ error: 'isFavorite muss ein Boolean sein' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
 
-    if ('folderId' in body) {
-      await tx
-        .update(document)
-        .set({ folderId: folderId ?? null })
-        .where(eq(document.id, id))
+  const updates: Record<string, unknown> = {}
+  if ('name' in body) updates.name = body.name!.trim()
+  if ('folderId' in body) updates.folderId = folderId ?? null
+  if ('isFavorite' in body) updates.isFavorite = body.isFavorite!
+  if ('trashedAt' in body)
+    updates.trashedAt = body.trashedAt === null ? null : new Date()
+  if ('archivedAt' in body)
+    updates.archivedAt = body.archivedAt === null ? null : new Date()
+
+  await db.transaction(async (tx) => {
+    if (Object.keys(updates).length > 0) {
+      await tx.update(document).set(updates).where(eq(document.id, id))
     }
 
     if ('tagIds' in body && Array.isArray(tagIds)) {
@@ -303,6 +355,9 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         name: updated.name,
         mimeType: updated.mimeType,
         fileSize: updated.fileSize,
+        isFavorite: updated.isFavorite,
+        archivedAt: updated.archivedAt,
+        trashedAt: updated.trashedAt,
         createdAt: updated.createdAt,
         updatedAt: updated.updatedAt,
         textContent: updated.textContent,

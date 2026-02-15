@@ -10,9 +10,19 @@ import {
 } from '@/db/schema/documents'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { isValidUUID, VALID_STATUSES } from '@/lib/api-utils'
-import { latestJobPerDoc } from '@/db/queries'
+import { latestJobPerDoc, viewConditions } from '@/db/queries'
+
+const VALID_VIEWS = new Set(['all', 'favorites', 'trash', 'archive'])
 
 export const GET: APIRoute = async ({ url }) => {
+  const view = url.searchParams.get('view') ?? 'all'
+  if (!VALID_VIEWS.has(view)) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültiger View-Parameter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
   const folderIds =
     url.searchParams.get('folderIds')?.split(',').filter(Boolean) ?? []
   const tagIds =
@@ -63,7 +73,7 @@ export const GET: APIRoute = async ({ url }) => {
     : 20
   const offset = (pageParam - 1) * pageSize
 
-  const conditions: SQL[] = []
+  const conditions: SQL[] = [...viewConditions(view)]
 
   if (folderIds.length > 0) {
     conditions.push(inArray(document.folderId, folderIds))
@@ -111,6 +121,9 @@ export const GET: APIRoute = async ({ url }) => {
       name: document.name,
       mimeType: document.mimeType,
       fileSize: document.fileSize,
+      isFavorite: document.isFavorite,
+      archivedAt: document.archivedAt,
+      trashedAt: document.trashedAt,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
       folderName: folder.name,
