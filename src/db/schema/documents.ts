@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm'
 import {
+  boolean,
   pgTable,
   text,
   timestamp,
@@ -43,6 +44,9 @@ export const document = pgTable(
     }),
     embedding: vector('embedding', { dimensions: 1024 }),
     textContent: text('text_content'),
+    isFavorite: boolean('is_favorite').notNull().default(false),
+    archivedAt: timestamp('archived_at'),
+    trashedAt: timestamp('trashed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at')
       .$onUpdate(() => new Date())
@@ -54,6 +58,9 @@ export const document = pgTable(
       'hnsw',
       table.embedding.op('vector_cosine_ops'),
     ),
+    index('document_isFavorite_idx').on(table.isFavorite),
+    index('document_trashedAt_idx').on(table.trashedAt),
+    index('document_archivedAt_idx').on(table.archivedAt),
   ],
 )
 
