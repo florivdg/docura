@@ -23,4 +23,6 @@ export const WORKER_CONFIG = {
   watchDebounceMs: 500,
   watchRescanIntervalMs: 60_000,
   maxFileSizeMB: Number(process.env.MAX_FILE_SIZE_MB || '50'),
+  trashRetentionDays: Number(process.env.TRASH_RETENTION_DAYS || '90'),
+  trashCleanupIntervalMs: 60 * 60 * 1000, // 1 hour
 } as const

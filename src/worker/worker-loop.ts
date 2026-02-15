@@ -1,6 +1,7 @@
 import { WORKER_CONFIG } from '@/worker/config'
 import { claimNextJob } from '@/worker/pipeline/job-lifecycle'
 import { processJob } from '@/worker/process-job'
+import { cleanupTrash } from '@/worker/trash-cleanup'
 import { assertDatabaseCompatibility } from '@/worker/utils/db-checks'
 import { startWatcher, stopWatcher } from '@/worker/watch'
 
@@ -36,6 +37,19 @@ async function workerLoop(workerId: number) {
   console.log(`[Worker ${workerId}] beendet`)
 }
 
+async function trashCleanupLoop() {
+  while (!shuttingDown) {
+    try {
+      const deleted = await cleanupTrash()
+      if (deleted > 0)
+        console.log(`Papierkorb: ${deleted} abgelaufene Dokumente gelöscht`)
+    } catch (error) {
+      console.error('Fehler bei Papierkorb-Bereinigung:', error)
+    }
+    await Bun.sleep(WORKER_CONFIG.trashCleanupIntervalMs)
+  }
+}
+
 export async function startWorker(
   concurrency = WORKER_CONFIG.workerConcurrency,
 ) {
@@ -49,6 +63,7 @@ export async function startWorker(
   console.log(`  WORKER_CONCURRENCY: ${concurrency}`)
   console.log(`  WATCH_DIR: ${WORKER_CONFIG.watchDir}`)
   console.log(`  WATCH_ENABLED: ${WORKER_CONFIG.watchEnabled}`)
+  console.log(`  TRASH_RETENTION_DAYS: ${WORKER_CONFIG.trashRetentionDays}`)
 
   await assertDatabaseCompatibility()
   console.log(
@@ -62,5 +77,5 @@ export async function startWorker(
   const workers = Array.from({ length: concurrency }, (_, i) =>
     workerLoop(i + 1),
   )
-  await Promise.all(workers)
+  await Promise.all([...workers, trashCleanupLoop()])
 }
