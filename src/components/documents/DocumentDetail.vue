@@ -7,6 +7,7 @@ import { statusConfig, stepLabels } from '@/lib/processing'
 import { useProcessingEvents } from '@/composables/useProcessingEvents'
 import type { DocumentTag } from '@/composables/useDocumentsFilter'
 import {
+  Archive,
   ArrowLeft,
   Download,
   Trash2,
@@ -17,6 +18,8 @@ import {
   CheckCircle2,
   CircleAlert,
   Plus,
+  RotateCcw,
+  Star,
   X,
   ScanText,
   ChevronsUpDown,
@@ -106,6 +109,9 @@ interface DocumentData {
   folder: DocumentFolder | null
   tags: DocumentTag[]
   processingJobs: ProcessingJobData[]
+  isFavorite: boolean
+  archivedAt: string | null
+  trashedAt: string | null
 }
 
 const props = defineProps<{
@@ -206,6 +212,116 @@ async function handleDelete() {
     window.alert('Fehler beim Löschen des Dokuments.')
   } finally {
     deleting.value = false
+  }
+}
+
+const restoring = ref(false)
+const permanentlyDeleting = ref(false)
+const archiving = ref(false)
+
+const backUrl = computed(() => {
+  if (doc.value?.trashedAt) return '/documents?view=trash'
+  if (doc.value?.archivedAt) return '/documents?view=archive'
+  return '/documents'
+})
+
+async function toggleFavorite() {
+  if (!doc.value) return
+  const prev = doc.value.isFavorite
+  doc.value.isFavorite = !prev
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isFavorite: !prev }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    } else if (doc.value) {
+      doc.value.isFavorite = prev
+    }
+  } catch {
+    if (doc.value) doc.value.isFavorite = prev
+  }
+}
+
+async function handleRestore() {
+  if (!doc.value) return
+  restoring.value = true
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashedAt: null }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    }
+  } catch {
+    // ignore
+  } finally {
+    restoring.value = false
+  }
+}
+
+async function handlePermanentDelete() {
+  permanentlyDeleting.value = true
+  try {
+    const res = await apiFetch(
+      `/api/documents/${props.documentId}?permanent=true`,
+      { method: 'DELETE' },
+    )
+    if (res.ok) {
+      window.location.href = '/documents?view=trash'
+    } else {
+      window.alert('Fehler beim endgültigen Löschen des Dokuments.')
+    }
+  } catch {
+    window.alert('Fehler beim endgültigen Löschen des Dokuments.')
+  } finally {
+    permanentlyDeleting.value = false
+  }
+}
+
+async function handleArchive() {
+  if (!doc.value) return
+  archiving.value = true
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archivedAt: new Date().toISOString() }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    }
+  } catch {
+    // ignore
+  } finally {
+    archiving.value = false
+  }
+}
+
+async function handleUnarchive() {
+  if (!doc.value) return
+  archiving.value = true
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archivedAt: null }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    }
+  } catch {
+    // ignore
+  } finally {
+    archiving.value = false
   }
 }
 
@@ -420,7 +536,7 @@ useProcessingEvents(
       <FileText class="text-muted-foreground size-12" />
       <p class="text-muted-foreground text-lg">Dokument nicht gefunden</p>
       <Button variant="outline" as-child>
-        <a href="/documents">
+        <a :href="backUrl">
           <ArrowLeft class="size-4" />
           Zurück zu Dokumente
         </a>
@@ -436,7 +552,7 @@ useProcessingEvents(
         Fehler beim Laden des Dokuments
       </p>
       <Button variant="outline" as-child>
-        <a href="/documents">
+        <a :href="backUrl">
           <ArrowLeft class="size-4" />
           Zurück zu Dokumente
         </a>
@@ -452,7 +568,7 @@ useProcessingEvents(
     >
       <div class="flex min-w-0 flex-1 items-center gap-3">
         <Button variant="ghost" size="icon" as-child>
-          <a href="/documents">
+          <a :href="backUrl">
             <ArrowLeft class="size-4" />
           </a>
         </Button>
@@ -478,23 +594,94 @@ useProcessingEvents(
         </h1>
       </div>
       <div class="flex gap-2">
+        <Button variant="ghost" size="icon" @click="toggleFavorite">
+          <Star
+            class="size-4"
+            :class="doc.isFavorite ? 'fill-yellow-400 text-yellow-400' : ''"
+          />
+        </Button>
         <Button variant="outline" as-child>
           <a :href="`/api/documents/${doc.id}/file?download=true`">
             <Download class="size-4" />
             Herunterladen
           </a>
         </Button>
+        <template v-if="!doc.trashedAt">
+          <Button
+            v-if="!doc.archivedAt"
+            variant="outline"
+            :disabled="archiving"
+            @click="handleArchive"
+          >
+            <Archive class="size-4" />
+            Archivieren
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger as-child>
+              <Button variant="destructive" :disabled="deleting">
+                <Loader2 v-if="deleting" class="size-4 animate-spin" />
+                <Trash2 v-else class="size-4" />
+                Löschen
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle
+                  >In den Papierkorb verschieben?</AlertDialogTitle
+                >
+                <AlertDialogDescription>
+                  Das Dokument „{{ doc.name }}" wird in den Papierkorb
+                  verschoben. Sie können es dort wiederherstellen oder endgültig
+                  löschen.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                <AlertDialogAction
+                  class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  @click="handleDelete"
+                >
+                  In den Papierkorb
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </template>
+      </div>
+    </div>
+
+    <!-- Trash banner -->
+    <div
+      v-if="doc.trashedAt"
+      class="border-destructive/30 bg-destructive/10 flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p class="text-sm font-medium">
+        Dieses Dokument befindet sich im Papierkorb.
+      </p>
+      <div class="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="restoring"
+          @click="handleRestore"
+        >
+          <RotateCcw class="size-4" />
+          Wiederherstellen
+        </Button>
         <AlertDialog>
           <AlertDialogTrigger as-child>
-            <Button variant="destructive" :disabled="deleting">
-              <Loader2 v-if="deleting" class="size-4 animate-spin" />
-              <Trash2 v-else class="size-4" />
-              Löschen
+            <Button
+              variant="destructive"
+              size="sm"
+              :disabled="permanentlyDeleting"
+            >
+              <Trash2 class="size-4" />
+              Endgültig löschen
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Dokument löschen?</AlertDialogTitle>
+              <AlertDialogTitle>Endgültig löschen?</AlertDialogTitle>
               <AlertDialogDescription>
                 Das Dokument „{{ doc.name }}" wird unwiderruflich gelöscht.
                 Diese Aktion kann nicht rückgängig gemacht werden.
@@ -504,14 +691,31 @@ useProcessingEvents(
               <AlertDialogCancel>Abbrechen</AlertDialogCancel>
               <AlertDialogAction
                 class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                @click="handleDelete"
+                @click="handlePermanentDelete"
               >
-                Löschen
+                Endgültig löschen
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       </div>
+    </div>
+
+    <!-- Archive banner -->
+    <div
+      v-else-if="doc.archivedAt"
+      class="border-border bg-muted/50 flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p class="text-sm font-medium">Dieses Dokument ist archiviert.</p>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="archiving"
+        @click="handleUnarchive"
+      >
+        <Archive class="size-4" />
+        Aus Archiv entfernen
+      </Button>
     </div>
 
     <!-- Content -->

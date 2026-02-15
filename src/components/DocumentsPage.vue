@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
@@ -23,10 +23,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Trash2 } from 'lucide-vue-next'
 import { useDocumentsFilter } from '@/composables/useDocumentsFilter'
 import { useProcessingEvents } from '@/composables/useProcessingEvents'
+import { apiFetch } from '@/lib/api-fetch'
 
 const {
+  view,
   query,
   searchMode,
   selectedFolderIds,
@@ -46,6 +61,92 @@ const {
   toggleSort,
   goToPage,
 } = useDocumentsFilter()
+
+const pageTitle = computed(() => {
+  switch (view.value) {
+    case 'favorites':
+      return 'Favoriten'
+    case 'trash':
+      return 'Papierkorb'
+    case 'archive':
+      return 'Archiv'
+    default:
+      return 'Dokumente'
+  }
+})
+
+const emptyingTrash = ref(false)
+const permanentDeleteOpen = ref(false)
+const pendingDeleteId = ref<string | null>(null)
+const trashRetentionDays = ref<number | null>(null)
+
+async function fetchTrashRetentionDays() {
+  try {
+    const res = await apiFetch('/api/documents/trash')
+    if (res.ok) {
+      const data = await res.json()
+      trashRetentionDays.value = data.retentionDays
+    }
+  } catch {
+    // fallback: leave null so the sentence is hidden
+  }
+}
+
+async function handleEmptyTrash() {
+  emptyingTrash.value = true
+  try {
+    const res = await apiFetch('/api/documents/trash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'empty' }),
+    })
+    if (res.ok) {
+      void fetchDocuments()
+    }
+  } catch {
+    // ignore
+  } finally {
+    emptyingTrash.value = false
+  }
+}
+
+async function handleRestore(id: string) {
+  try {
+    const res = await apiFetch(`/api/documents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashedAt: null }),
+    })
+    if (res.ok) {
+      void fetchDocuments()
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function handlePermanentDelete(id: string) {
+  pendingDeleteId.value = id
+  permanentDeleteOpen.value = true
+}
+
+async function confirmPermanentDelete() {
+  const id = pendingDeleteId.value
+  if (!id) return
+  try {
+    const res = await apiFetch(`/api/documents/${id}?permanent=true`, {
+      method: 'DELETE',
+    })
+    if (res.ok) {
+      void fetchDocuments()
+    }
+  } catch {
+    // ignore
+  } finally {
+    permanentDeleteOpen.value = false
+    pendingDeleteId.value = null
+  }
+}
 
 const debouncedRefetch = useDebounceFn(fetchDocuments, 500)
 
@@ -81,6 +182,16 @@ function onDocumentUploaded() {
   void fetchDocuments()
 }
 
+watch(
+  view,
+  (newView) => {
+    if (newView === 'trash' && trashRetentionDays.value === null) {
+      void fetchTrashRetentionDays()
+    }
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   void fetchDocuments()
   window.addEventListener('document-uploaded', onDocumentUploaded)
@@ -95,7 +206,7 @@ onUnmounted(() => {
   <SidebarProvider>
     <AppSidebar />
     <SidebarInset>
-      <SiteHeader title="Dokumente" />
+      <SiteHeader :title="pageTitle" />
       <div class="flex flex-1 flex-col">
         <div class="flex flex-col gap-4 p-4 md:gap-6 md:p-6">
           <DocumentsFilterBar
@@ -107,16 +218,61 @@ onUnmounted(() => {
             :has-active-filters="hasActiveFilters"
             @clear="clearFilters"
           />
+
+          <!-- Trash info bar -->
+          <div
+            v-if="view === 'trash' && !loading && documents.length > 0"
+            class="border-destructive/30 bg-destructive/5 flex items-center justify-between rounded-lg border px-4 py-3"
+          >
+            <p v-if="trashRetentionDays" class="text-muted-foreground text-sm">
+              Dokumente im Papierkorb werden nach {{ trashRetentionDays }} Tagen
+              automatisch gelöscht.
+            </p>
+            <AlertDialog>
+              <AlertDialogTrigger as-child>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  :disabled="emptyingTrash"
+                >
+                  <Trash2 class="size-4" />
+                  Papierkorb leeren
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Papierkorb leeren?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Alle Dokumente im Papierkorb werden endgültig gelöscht.
+                    Diese Aktion kann nicht rückgängig gemacht werden.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                  <AlertDialogAction
+                    class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    @click="handleEmptyTrash"
+                  >
+                    Endgültig löschen
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+
           <DocumentsTable
             :documents="documents"
             :loading="loading"
             :has-active-filters="hasActiveFilters"
             :sort-column="sortColumn"
             :sort-order="sortOrder"
+            :view="view"
             @sort="
               (col: string) =>
                 toggleSort(col as 'name' | 'fileSize' | 'createdAt')
             "
+            @restore="handleRestore"
+            @permanent-delete="handlePermanentDelete"
           />
           <div
             v-if="!loading && documents.length > 0"
@@ -176,6 +332,26 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <AlertDialog v-model:open="permanentDeleteOpen">
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Dokument endgültig löschen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Das Dokument wird unwiderruflich gelöscht. Diese Aktion kann nicht
+              rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              @click="confirmPermanentDelete"
+            >
+              Endgültig löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SidebarInset>
   </SidebarProvider>
 </template>

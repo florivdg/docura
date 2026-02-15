@@ -2,9 +2,11 @@ import { computed, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { apiFetch } from '@/lib/api-fetch'
 
+export type ViewType = 'all' | 'favorites' | 'trash' | 'archive'
 type SortColumn = 'name' | 'fileSize' | 'createdAt'
 type SortOrder = 'asc' | 'desc'
 const VALID_SORT_COLUMNS: SortColumn[] = ['name', 'fileSize', 'createdAt']
+const VALID_VIEWS: ViewType[] = ['all', 'favorites', 'trash', 'archive']
 const VALID_PAGE_SIZES = [20, 50, 100] as const
 
 export interface DocumentTag {
@@ -25,17 +27,25 @@ export interface DocumentRow {
   processingStatus: string | null
   processingStep: string | null
   processingError: string | null
+  isFavorite: boolean
+  archivedAt: string | null
+  trashedAt: string | null
   headline?: string | null
   similarity?: number | null
 }
 
 function parseUrlState() {
   const params = new URLSearchParams(window.location.search)
+  const viewParam = params.get('view') as ViewType | null
   const sortParam = params.get('sort')
   const orderParam = params.get('order')
   const pageParam = parseInt(params.get('page') ?? '1', 10)
   const sizeParam = parseInt(params.get('size') ?? '20', 10)
   return {
+    view:
+      viewParam && VALID_VIEWS.includes(viewParam)
+        ? viewParam
+        : ('all' as ViewType),
     query: params.get('q') ?? '',
     searchMode: (params.get('mode') === 'semantic'
       ? 'semantic'
@@ -60,6 +70,7 @@ function parseUrlState() {
 export function useDocumentsFilter() {
   // State (initialized from URL params)
   const initial = parseUrlState()
+  const view = ref<ViewType>(initial.view)
   const query = ref(initial.query)
   const searchMode = ref(initial.searchMode)
   const selectedFolderIds = ref(initial.folderIds)
@@ -93,6 +104,9 @@ export function useDocumentsFilter() {
 
   function buildFilterParams(): URLSearchParams {
     const params = new URLSearchParams()
+    if (view.value !== 'all') {
+      params.set('view', view.value)
+    }
     if (selectedFolderIds.value.length > 0) {
       params.set('folderIds', selectedFolderIds.value.join(','))
     }
@@ -190,6 +204,13 @@ export function useDocumentsFilter() {
 
   const debouncedFetch = useDebounceFn(fetchDocuments, 300)
 
+  // Watch view - immediate fetch
+  watch(view, () => {
+    if (clearingFilters) return
+    currentPage.value = 1
+    void fetchDocuments()
+  })
+
   // Watch query with debounce
   watch(query, () => {
     if (clearingFilters) return
@@ -234,6 +255,7 @@ export function useDocumentsFilter() {
   // Sync state to URL params
   function syncToUrl() {
     const params = new URLSearchParams()
+    if (view.value !== 'all') params.set('view', view.value)
     if (query.value.trim()) params.set('q', query.value.trim())
     if (searchMode.value !== 'fulltext') params.set('mode', searchMode.value)
     if (selectedFolderIds.value.length > 0)
@@ -258,6 +280,7 @@ export function useDocumentsFilter() {
 
   watch(
     [
+      view,
       query,
       searchMode,
       selectedFolderIds,
@@ -275,6 +298,7 @@ export function useDocumentsFilter() {
   )
 
   return {
+    view,
     query,
     searchMode,
     selectedFolderIds,

@@ -9,11 +9,14 @@ import {
   FileText,
   Image,
   Loader2,
+  RotateCcw,
   SearchX,
+  Star,
+  Trash2,
 } from 'lucide-vue-next'
 import { formatFileSize, isImageMime } from '@/lib/format'
 import { statusConfig, stepLabels } from '@/lib/processing'
-import type { DocumentRow } from '@/composables/useDocumentsFilter'
+import type { DocumentRow, ViewType } from '@/composables/useDocumentsFilter'
 import {
   Table,
   TableBody,
@@ -24,6 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -38,9 +42,14 @@ const props = defineProps<{
   hasActiveFilters?: boolean
   sortColumn: string | null
   sortOrder: string
+  view?: ViewType
 }>()
 
-const emit = defineEmits<{ sort: [column: string] }>()
+const emit = defineEmits<{
+  sort: [column: string]
+  restore: [id: string]
+  permanentDelete: [id: string]
+}>()
 
 function sortIcon(column: string) {
   if (props.sortColumn !== column) return ArrowUpDown
@@ -63,6 +72,21 @@ const dateFormatter = new Intl.DateTimeFormat('de-DE', {
 function formatDate(dateStr: string): string {
   return dateFormatter.format(new Date(dateStr))
 }
+
+function emptyStateText(): string {
+  switch (props.view) {
+    case 'trash':
+      return 'Der Papierkorb ist leer'
+    case 'favorites':
+      return 'Noch keine Favoriten vorhanden'
+    case 'archive':
+      return 'Kein Dokument archiviert'
+    default:
+      return 'Noch keine Dokumente vorhanden'
+  }
+}
+
+const colCount = () => (props.view === 'trash' ? 8 : 6)
 </script>
 
 <template>
@@ -93,13 +117,20 @@ function formatDate(dateStr: string): string {
         <TableHead :aria-sort="ariaSort('createdAt')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
-            aria-label="Nach Hochladedatum sortieren"
+            :aria-label="
+              props.view === 'trash'
+                ? 'Nach Löschdatum sortieren'
+                : 'Nach Hochladedatum sortieren'
+            "
             @click="emit('sort', 'createdAt')"
           >
-            Hochgeladen
+            {{ props.view === 'trash' ? 'Gelöscht am' : 'Hochgeladen' }}
             <component :is="sortIcon('createdAt')" class="size-3.5" />
           </button>
         </TableHead>
+        <template v-if="props.view === 'trash'">
+          <TableHead class="w-[1%]">Aktionen</TableHead>
+        </template>
       </TableRow>
     </TableHeader>
     <TableBody>
@@ -121,10 +152,13 @@ function formatDate(dateStr: string): string {
           <TableCell><Skeleton class="h-4 w-16" /></TableCell>
           <TableCell><Skeleton class="h-5 w-24" /></TableCell>
           <TableCell><Skeleton class="h-4 w-28" /></TableCell>
+          <TableCell v-if="props.view === 'trash'">
+            <Skeleton class="h-8 w-20" />
+          </TableCell>
         </TableRow>
       </template>
       <template v-else-if="props.documents.length === 0">
-        <TableEmpty :colspan="6">
+        <TableEmpty :colspan="colCount()">
           <div class="flex flex-col items-center gap-2">
             <component
               :is="props.hasActiveFilters ? SearchX : FileText"
@@ -134,7 +168,7 @@ function formatDate(dateStr: string): string {
               {{
                 props.hasActiveFilters
                   ? 'Keine Dokumente gefunden'
-                  : 'Noch keine Dokumente vorhanden'
+                  : emptyStateText()
               }}
             </p>
           </div>
@@ -144,7 +178,12 @@ function formatDate(dateStr: string): string {
         <TableRow v-for="doc in props.documents" :key="doc.id">
           <TableCell>
             <div class="flex items-center gap-2">
+              <Star
+                v-if="doc.isFavorite"
+                class="size-4 shrink-0 fill-yellow-400 text-yellow-400"
+              />
               <component
+                v-else
                 :is="isImageMime(doc.mimeType) ? Image : FileText"
                 class="text-muted-foreground size-4 shrink-0"
               />
@@ -252,7 +291,45 @@ function formatDate(dateStr: string): string {
             <span v-else class="text-muted-foreground">—</span>
           </TableCell>
           <TableCell class="whitespace-nowrap">
-            {{ formatDate(doc.createdAt) }}
+            {{
+              props.view === 'trash' && doc.trashedAt
+                ? formatDate(doc.trashedAt)
+                : formatDate(doc.createdAt)
+            }}
+          </TableCell>
+          <TableCell v-if="props.view === 'trash'" class="whitespace-nowrap">
+            <div class="flex gap-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-8"
+                      @click="emit('restore', doc.id)"
+                    >
+                      <RotateCcw class="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Wiederherstellen</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="text-destructive hover:text-destructive size-8"
+                      @click="emit('permanentDelete', doc.id)"
+                    >
+                      <Trash2 class="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Endgültig löschen</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </TableCell>
         </TableRow>
       </template>
