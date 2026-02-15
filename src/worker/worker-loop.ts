@@ -7,6 +7,15 @@ import { startWatcher, stopWatcher } from '@/worker/watch'
 
 let shuttingDown = false
 
+async function interruptibleSleep(ms: number) {
+  const step = 1000
+  let remaining = ms
+  while (remaining > 0 && !shuttingDown) {
+    await Bun.sleep(Math.min(step, remaining))
+    remaining -= step
+  }
+}
+
 function registerShutdownHandlers() {
   const handler = () => {
     if (shuttingDown) return
@@ -46,7 +55,7 @@ async function trashCleanupLoop() {
     } catch (error) {
       console.error('Fehler bei Papierkorb-Bereinigung:', error)
     }
-    await Bun.sleep(WORKER_CONFIG.trashCleanupIntervalMs)
+    await interruptibleSleep(WORKER_CONFIG.trashCleanupIntervalMs)
   }
 }
 
