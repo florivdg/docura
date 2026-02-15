@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  Archive,
   FileText,
   FolderOpen,
   HardDrive,
@@ -61,6 +62,7 @@ const navMain = [
     title: 'Dokumente',
     url: '/documents',
     icon: FileText,
+    exact: true,
   },
   {
     title: 'Ordner',
@@ -76,18 +78,23 @@ const navMain = [
 
 const navDocuments = [
   {
-    name: 'Zuletzt hochgeladen',
+    title: 'Zuletzt hochgeladen',
     url: '/documents?sort=createdAt&order=desc',
     icon: Upload,
   },
   {
-    name: 'Favoriten',
-    url: '#',
+    title: 'Favoriten',
+    url: '/documents?view=favorites',
     icon: Star,
   },
   {
-    name: 'Papierkorb',
-    url: '#',
+    title: 'Archiv',
+    url: '/documents?view=archive',
+    icon: Archive,
+  },
+  {
+    title: 'Papierkorb',
+    url: '/documents?view=trash',
     icon: Trash2,
   },
 ]
@@ -142,7 +149,7 @@ const navSecondary = [
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <NavDocuments :items="navDocuments" />
+      <NavDocuments :items="navDocuments" :current-path="currentPath" />
       <NavSecondary
         :items="navSecondary"
         :current-path="currentPath"
