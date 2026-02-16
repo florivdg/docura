@@ -34,11 +34,20 @@ export const onRequest = defineMiddleware(async (context, next) => {
   ) {
     const origin = context.request.headers.get('Origin')
     const allowedOrigin = process.env.BETTER_AUTH_URL
-    if (
-      !origin ||
-      !allowedOrigin ||
-      new URL(origin).origin !== new URL(allowedOrigin).origin
-    ) {
+    if (!origin || !allowedOrigin) {
+      return new Response(JSON.stringify({ error: 'Ungültiger Origin' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    try {
+      if (new URL(origin).origin !== new URL(allowedOrigin).origin) {
+        return new Response(JSON.stringify({ error: 'Ungültiger Origin' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+    } catch {
       return new Response(JSON.stringify({ error: 'Ungültiger Origin' }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
