@@ -1,12 +1,14 @@
 import { relations, sql } from 'drizzle-orm'
 import {
   boolean,
+  date,
   pgTable,
   text,
   timestamp,
   integer,
   uuid,
   index,
+  uniqueIndex,
   vector,
   primaryKey,
   check,
@@ -31,6 +33,23 @@ export const folder = pgTable(
   ],
 )
 
+export const correspondent = pgTable(
+  'correspondent',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  // Case-insensitive uniqueness: prevents 'Acme' and 'ACME' from coexisting,
+  // so concurrent find-or-create races always collapse onto one row.
+  (table) => [
+    uniqueIndex('correspondent_name_lower_idx').on(sql`lower(${table.name})`),
+  ],
+)
+
 export const document = pgTable(
   'document',
   {
@@ -39,9 +58,15 @@ export const document = pgTable(
     mimeType: text('mime_type').notNull(),
     fileSize: integer('file_size').notNull(),
     storagePath: text('storage_path').notNull(),
+    sha256: text('sha256'),
     folderId: uuid('folder_id').references(() => folder.id, {
       onDelete: 'set null',
     }),
+    correspondentId: uuid('correspondent_id').references(
+      () => correspondent.id,
+      { onDelete: 'set null' },
+    ),
+    documentDate: date('document_date', { mode: 'string' }),
     embedding: vector('embedding', { dimensions: 1024 }),
     textContent: text('text_content'),
     isFavorite: boolean('is_favorite').notNull().default(false),
@@ -54,6 +79,9 @@ export const document = pgTable(
   },
   (table) => [
     index('document_folderId_idx').on(table.folderId),
+    index('document_correspondentId_idx').on(table.correspondentId),
+    index('document_documentDate_idx').on(table.documentDate),
+    uniqueIndex('document_sha256_idx').on(table.sha256),
     index('document_embedding_idx').using(
       'hnsw',
       table.embedding.op('vector_cosine_ops'),
@@ -135,8 +163,16 @@ export const documentRelations = relations(document, ({ one, many }) => ({
     fields: [document.folderId],
     references: [folder.id],
   }),
+  correspondent: one(correspondent, {
+    fields: [document.correspondentId],
+    references: [correspondent.id],
+  }),
   documentTags: many(documentTag),
   processingJobs: many(processingJob),
+}))
+
+export const correspondentRelations = relations(correspondent, ({ many }) => ({
+  documents: many(document),
 }))
 
 export const tagRelations = relations(tag, ({ many }) => ({

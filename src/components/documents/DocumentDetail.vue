@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AcceptableValue } from 'reka-ui'
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { formatFileSize, isImageMime } from '@/lib/format'
 import { apiFetch } from '@/lib/api-fetch'
 import { statusConfig, stepLabels } from '@/lib/processing'
@@ -9,6 +9,7 @@ import type { DocumentTag } from '@/composables/useDocumentsFilter'
 import {
   Archive,
   ArrowLeft,
+  Check,
   Download,
   Trash2,
   FileText,
@@ -77,12 +78,30 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import TagDialog from '@/components/tags/TagDialog.vue'
 
 interface DocumentFolder {
+  id: string
+  name: string
+}
+
+interface DocumentCorrespondent {
   id: string
   name: string
 }
@@ -105,8 +124,10 @@ interface DocumentData {
   fileSize: number
   createdAt: string
   updatedAt: string
+  documentDate: string | null
   textContent: string | null
   folder: DocumentFolder | null
+  correspondent: DocumentCorrespondent | null
   tags: DocumentTag[]
   processingJobs: ProcessingJobData[]
   isFavorite: boolean
@@ -143,6 +164,28 @@ async function startEditName() {
   el?.focus()
 }
 
+/** PATCHt das Dokument; bei Fehlern wird die optimistische Änderung zurückgerollt. */
+async function patchDocument(
+  payload: Record<string, unknown>,
+  rollback?: () => void,
+) {
+  try {
+    const res = await apiFetch(`/api/documents/${props.documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      doc.value = data.document
+    } else {
+      rollback?.()
+    }
+  } catch {
+    rollback?.()
+  }
+}
+
 async function saveDocName() {
   if (!doc.value) return
   const trimmed = editNameValue.value.trim()
@@ -153,21 +196,9 @@ async function saveDocName() {
   const prev = doc.value.name
   doc.value.name = trimmed
   editingName.value = false
-  try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmed }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    } else {
-      doc.value.name = prev
-    }
-  } catch {
+  await patchDocument({ name: trimmed }, () => {
     if (doc.value) doc.value.name = prev
-  }
+  })
 }
 
 function wordCount(text: string): number {
@@ -176,8 +207,16 @@ function wordCount(text: string): number {
 
 const allFolders = ref<FolderOption[]>([])
 const allTags = ref<DocumentTag[]>([])
+const allCorrespondents = ref<DocumentCorrespondent[]>([])
 const tagDialogOpen = ref(false)
 const fullscreenZoomed = ref(false)
+const correspondentPopoverOpen = ref(false)
+const correspondentSearch = ref('')
+const creatingCorrespondent = ref(false)
+
+watch(correspondentPopoverOpen, (open) => {
+  if (!open) correspondentSearch.value = ''
+})
 
 const dateFormatter = new Intl.DateTimeFormat('de-DE', {
   day: '2-digit',
@@ -229,38 +268,16 @@ async function toggleFavorite() {
   if (!doc.value) return
   const prev = doc.value.isFavorite
   doc.value.isFavorite = !prev
-  try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isFavorite: !prev }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    } else if (doc.value) {
-      doc.value.isFavorite = prev
-    }
-  } catch {
+  await patchDocument({ isFavorite: !prev }, () => {
     if (doc.value) doc.value.isFavorite = prev
-  }
+  })
 }
 
 async function handleRestore() {
   if (!doc.value) return
   restoring.value = true
   try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trashedAt: null }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    }
-  } catch {
-    // ignore
+    await patchDocument({ trashedAt: null })
   } finally {
     restoring.value = false
   }
@@ -289,17 +306,7 @@ async function handleArchive() {
   if (!doc.value) return
   archiving.value = true
   try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archivedAt: new Date().toISOString() }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    }
-  } catch {
-    // ignore
+    await patchDocument({ archivedAt: new Date().toISOString() })
   } finally {
     archiving.value = false
   }
@@ -309,17 +316,7 @@ async function handleUnarchive() {
   if (!doc.value) return
   archiving.value = true
   try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archivedAt: null }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    }
-  } catch {
-    // ignore
+    await patchDocument({ archivedAt: null })
   } finally {
     archiving.value = false
   }
@@ -345,20 +342,74 @@ async function handleFolderChange(value: AcceptableValue) {
     ? { id: newFolder.id, name: newFolder.name }
     : null
 
-  try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folderId: newFolderId }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    } else if (doc.value) {
-      doc.value.folder = prevFolder
-    }
-  } catch {
+  await patchDocument({ folderId: newFolderId }, () => {
     if (doc.value) doc.value.folder = prevFolder
+  })
+}
+
+async function handleDocumentDateChange(value: string | null) {
+  if (!doc.value) return
+
+  const newDate = value && value.trim() ? value.trim() : null
+  const prevDate = doc.value.documentDate
+  if (newDate === prevDate) return
+
+  doc.value.documentDate = newDate
+
+  await patchDocument({ documentDate: newDate }, () => {
+    if (doc.value) doc.value.documentDate = prevDate
+  })
+}
+
+function onDocumentDateInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  void handleDocumentDateChange(target.value)
+}
+
+async function applyCorrespondent(next: DocumentCorrespondent | null) {
+  if (!doc.value) return
+
+  const prevCorrespondent = doc.value.correspondent
+  if ((prevCorrespondent?.id ?? null) === (next?.id ?? null)) return
+
+  doc.value.correspondent = next
+
+  await patchDocument({ correspondentId: next?.id ?? null }, () => {
+    if (doc.value) doc.value.correspondent = prevCorrespondent
+  })
+}
+
+function handleCorrespondentSelect(next: DocumentCorrespondent | null) {
+  correspondentPopoverOpen.value = false
+  void applyCorrespondent(next)
+}
+
+async function handleCorrespondentCreate() {
+  const name = correspondentSearch.value.trim()
+  if (!name || creatingCorrespondent.value) return
+
+  creatingCorrespondent.value = true
+  try {
+    const res = await apiFetch('/api/correspondents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) return
+
+    const data = await res.json()
+    const created = data.correspondent as DocumentCorrespondent
+    if (!allCorrespondents.value.some((c) => c.id === created.id)) {
+      allCorrespondents.value = [...allCorrespondents.value, created].sort(
+        (a, b) => a.name.localeCompare(b.name, 'de'),
+      )
+    }
+    correspondentPopoverOpen.value = false
+    await applyCorrespondent(created)
+  } catch {
+    // ignore
+  } finally {
+    creatingCorrespondent.value = false
   }
 }
 
@@ -377,21 +428,9 @@ async function handleTagToggle(tagId: string, checked: boolean) {
     newTagIds = doc.value.tags.map((t) => t.id)
   }
 
-  try {
-    const res = await apiFetch(`/api/documents/${props.documentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tagIds: newTagIds }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      doc.value = data.document
-    } else if (doc.value) {
-      doc.value.tags = prevTags
-    }
-  } catch {
+  await patchDocument({ tagIds: newTagIds }, () => {
     if (doc.value) doc.value.tags = prevTags
-  }
+  })
 }
 
 async function handleTagRemove(tagId: string) {
@@ -426,10 +465,11 @@ async function handleTagCreated(tag: {
 
 onMounted(async () => {
   try {
-    const [docRes, foldersRes, tagsRes] = await Promise.all([
+    const [docRes, foldersRes, tagsRes, correspondentsRes] = await Promise.all([
       apiFetch(`/api/documents/${props.documentId}`),
       apiFetch('/api/folders/all'),
       apiFetch('/api/tags'),
+      apiFetch('/api/correspondents'),
     ])
 
     if (docRes.status === 404) {
@@ -452,6 +492,11 @@ onMounted(async () => {
     if (tagsRes.ok) {
       const tagsData = await tagsRes.json()
       allTags.value = tagsData.tags
+    }
+
+    if (correspondentsRes.ok) {
+      const correspondentsData = await correspondentsRes.json()
+      allCorrespondents.value = correspondentsData.correspondents ?? []
     }
   } catch {
     error.value = true
@@ -868,6 +913,79 @@ useProcessingEvents(
               <span>{{ formatFileSize(doc.fileSize) }}</span>
             </div>
             <Separator />
+            <div class="flex items-center justify-between gap-2 text-sm">
+              <span class="text-muted-foreground">Korrespondent</span>
+              <Popover v-model:open="correspondentPopoverOpen">
+                <PopoverTrigger as-child>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-7 w-auto max-w-[180px] justify-between gap-1 px-2 font-normal"
+                  >
+                    <span class="truncate">
+                      {{ doc.correspondent?.name ?? 'Kein Korrespondent' }}
+                    </span>
+                    <ChevronsUpDown class="size-3.5 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" class="w-[240px] p-0">
+                  <Command>
+                    <CommandInput
+                      v-model="correspondentSearch"
+                      placeholder="Suchen oder erstellen…"
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        <button
+                          v-if="correspondentSearch.trim()"
+                          type="button"
+                          class="hover:bg-accent hover:text-accent-foreground mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:opacity-50"
+                          :disabled="creatingCorrespondent"
+                          @click="handleCorrespondentCreate"
+                        >
+                          <Plus class="size-3.5 shrink-0" />
+                          <span class="truncate">
+                            „{{ correspondentSearch.trim() }}" erstellen
+                          </span>
+                        </button>
+                        <span v-else>Nicht gefunden</span>
+                      </CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="Kein Korrespondent"
+                          @select.prevent="handleCorrespondentSelect(null)"
+                        >
+                          <Check
+                            class="size-3.5"
+                            :class="
+                              doc.correspondent ? 'opacity-0' : 'opacity-100'
+                            "
+                          />
+                          Kein Korrespondent
+                        </CommandItem>
+                        <CommandItem
+                          v-for="c in allCorrespondents"
+                          :key="c.id"
+                          :value="c.name"
+                          @select.prevent="handleCorrespondentSelect(c)"
+                        >
+                          <Check
+                            class="size-3.5"
+                            :class="
+                              doc.correspondent?.id === c.id
+                                ? 'opacity-100'
+                                : 'opacity-0'
+                            "
+                          />
+                          {{ c.name }}
+                        </CommandItem>
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <Separator />
             <div class="flex items-center justify-between text-sm">
               <span class="text-muted-foreground">Ordner</span>
               <Select
@@ -945,6 +1063,30 @@ useProcessingEvents(
                 </Badge>
               </div>
               <span v-else class="text-muted-foreground">—</span>
+            </div>
+            <Separator />
+            <div class="flex items-center justify-between gap-2 text-sm">
+              <span class="text-muted-foreground">Belegdatum</span>
+              <div class="flex items-center gap-1">
+                <Input
+                  type="date"
+                  :model-value="doc.documentDate ?? ''"
+                  class="h-7 w-[140px] px-2 py-0 text-sm"
+                  aria-label="Belegdatum"
+                  @change="onDocumentDateInput"
+                />
+                <Button
+                  v-if="doc.documentDate"
+                  variant="ghost"
+                  size="icon"
+                  class="size-6"
+                  title="Belegdatum entfernen"
+                  aria-label="Belegdatum entfernen"
+                  @click="handleDocumentDateChange(null)"
+                >
+                  <X class="size-3" />
+                </Button>
+              </div>
             </div>
             <Separator />
             <div class="flex justify-between text-sm">

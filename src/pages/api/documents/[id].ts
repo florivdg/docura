@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro'
 import { db } from '@/db'
 import {
+  correspondent,
   document,
   processingJob,
   documentTag,
@@ -10,11 +11,98 @@ import {
 import { eq, desc, inArray } from 'drizzle-orm'
 import { unlink } from 'node:fs/promises'
 import {
+  isValidIsoDate,
   isValidUUID,
   safePath,
   parseJsonBody,
   JsonParseError,
 } from '@/lib/api-utils'
+
+async function loadCorrespondent(
+  correspondentId: string | null,
+): Promise<{ id: string; name: string } | null> {
+  if (!correspondentId) return null
+
+  const rows = await db
+    .select({ id: correspondent.id, name: correspondent.name })
+    .from(correspondent)
+    .where(eq(correspondent.id, correspondentId))
+    .limit(1)
+
+  return rows[0] ?? null
+}
+
+type DocumentRow = typeof document.$inferSelect
+
+/** Lädt Ordner, Korrespondent, Tags und Jobs eines Dokuments parallel. */
+async function loadDocumentRelations(doc: DocumentRow) {
+  const [docFolder, docCorrespondent, tags, processingJobs] = await Promise.all(
+    [
+      doc.folderId
+        ? db
+            .select({ id: folder.id, name: folder.name })
+            .from(folder)
+            .where(eq(folder.id, doc.folderId))
+            .limit(1)
+            .then((rows) => rows[0] ?? null)
+        : null,
+      loadCorrespondent(doc.correspondentId),
+      db
+        .select({ id: tag.id, name: tag.name, color: tag.color })
+        .from(documentTag)
+        .innerJoin(tag, eq(documentTag.tagId, tag.id))
+        .where(eq(documentTag.documentId, doc.id)),
+      db
+        .select({
+          id: processingJob.id,
+          status: processingJob.status,
+          step: processingJob.step,
+          errorMessage: processingJob.errorMessage,
+          attempts: processingJob.attempts,
+          startedAt: processingJob.startedAt,
+          completedAt: processingJob.completedAt,
+          createdAt: processingJob.createdAt,
+        })
+        .from(processingJob)
+        .where(eq(processingJob.documentId, doc.id))
+        .orderBy(desc(processingJob.createdAt)),
+    ],
+  )
+
+  return {
+    folder: docFolder,
+    correspondent: docCorrespondent,
+    tags,
+    processingJobs,
+  }
+}
+
+async function documentResponse(doc: DocumentRow): Promise<Response> {
+  const relations = await loadDocumentRelations(doc)
+
+  return new Response(
+    JSON.stringify({
+      document: {
+        id: doc.id,
+        name: doc.name,
+        mimeType: doc.mimeType,
+        fileSize: doc.fileSize,
+        isFavorite: doc.isFavorite,
+        archivedAt: doc.archivedAt,
+        trashedAt: doc.trashedAt,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        documentDate: doc.documentDate,
+        textContent: doc.textContent,
+        folder: relations.folder,
+        correspondent: relations.correspondent,
+        tags: relations.tags,
+        processingJobs: relations.processingJobs,
+      },
+    }),
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+}
 
 export const GET: APIRoute = async ({ params }) => {
   const { id } = params
@@ -39,57 +127,7 @@ export const GET: APIRoute = async ({ params }) => {
     })
   }
 
-  const docFolder = doc.folderId
-    ? ((
-        await db
-          .select({ id: folder.id, name: folder.name })
-          .from(folder)
-          .where(eq(folder.id, doc.folderId))
-          .limit(1)
-      )[0] ?? null)
-    : null
-
-  const tags = await db
-    .select({ id: tag.id, name: tag.name, color: tag.color })
-    .from(documentTag)
-    .innerJoin(tag, eq(documentTag.tagId, tag.id))
-    .where(eq(documentTag.documentId, id))
-
-  const processingJobs = await db
-    .select({
-      id: processingJob.id,
-      status: processingJob.status,
-      step: processingJob.step,
-      errorMessage: processingJob.errorMessage,
-      attempts: processingJob.attempts,
-      startedAt: processingJob.startedAt,
-      completedAt: processingJob.completedAt,
-      createdAt: processingJob.createdAt,
-    })
-    .from(processingJob)
-    .where(eq(processingJob.documentId, id))
-    .orderBy(desc(processingJob.createdAt))
-
-  return new Response(
-    JSON.stringify({
-      document: {
-        id: doc.id,
-        name: doc.name,
-        mimeType: doc.mimeType,
-        fileSize: doc.fileSize,
-        isFavorite: doc.isFavorite,
-        archivedAt: doc.archivedAt,
-        trashedAt: doc.trashedAt,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt,
-        textContent: doc.textContent,
-        folder: docFolder,
-        tags,
-        processingJobs,
-      },
-    }),
-    { headers: { 'Content-Type': 'application/json' } },
-  )
+  return documentResponse(doc)
 }
 
 export const DELETE: APIRoute = async ({ params, url }) => {
@@ -191,6 +229,8 @@ export const PATCH: APIRoute = async ({ params, request }) => {
 
   let body: {
     folderId?: string | null
+    correspondentId?: string | null
+    documentDate?: string | null
     tagIds?: string[]
     name?: string
     isFavorite?: boolean
@@ -228,6 +268,43 @@ export const PATCH: APIRoute = async ({ params, request }) => {
         return new Response(
           JSON.stringify({ error: 'Ordner nicht gefunden' }),
           { status: 404, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+    }
+  }
+
+  if ('correspondentId' in body) {
+    const { correspondentId } = body
+    if (correspondentId !== null && correspondentId !== undefined) {
+      if (!isValidUUID(correspondentId)) {
+        return new Response(
+          JSON.stringify({ error: 'Ungültige Korrespondenten-ID' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+
+      const [c] = await db
+        .select({ id: correspondent.id })
+        .from(correspondent)
+        .where(eq(correspondent.id, correspondentId))
+        .limit(1)
+
+      if (!c) {
+        return new Response(
+          JSON.stringify({ error: 'Korrespondent nicht gefunden' }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+    }
+  }
+
+  if ('documentDate' in body) {
+    const { documentDate } = body
+    if (documentDate !== null && documentDate !== undefined) {
+      if (typeof documentDate !== 'string' || !isValidIsoDate(documentDate)) {
+        return new Response(
+          JSON.stringify({ error: 'Ungültiges Belegdatum' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
         )
       }
     }
@@ -288,6 +365,9 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   const updates: Record<string, unknown> = {}
   if ('name' in body) updates.name = body.name!.trim()
   if ('folderId' in body) updates.folderId = folderId ?? null
+  if ('correspondentId' in body)
+    updates.correspondentId = body.correspondentId ?? null
+  if ('documentDate' in body) updates.documentDate = body.documentDate ?? null
   if ('isFavorite' in body) updates.isFavorite = body.isFavorite!
   if ('trashedAt' in body)
     updates.trashedAt = body.trashedAt === null ? null : new Date()
@@ -317,55 +397,5 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     .where(eq(document.id, id))
     .limit(1)
 
-  const docFolder = updated.folderId
-    ? ((
-        await db
-          .select({ id: folder.id, name: folder.name })
-          .from(folder)
-          .where(eq(folder.id, updated.folderId))
-          .limit(1)
-      )[0] ?? null)
-    : null
-
-  const updatedTags = await db
-    .select({ id: tag.id, name: tag.name, color: tag.color })
-    .from(documentTag)
-    .innerJoin(tag, eq(documentTag.tagId, tag.id))
-    .where(eq(documentTag.documentId, id))
-
-  const processingJobs = await db
-    .select({
-      id: processingJob.id,
-      status: processingJob.status,
-      step: processingJob.step,
-      errorMessage: processingJob.errorMessage,
-      attempts: processingJob.attempts,
-      startedAt: processingJob.startedAt,
-      completedAt: processingJob.completedAt,
-      createdAt: processingJob.createdAt,
-    })
-    .from(processingJob)
-    .where(eq(processingJob.documentId, id))
-    .orderBy(desc(processingJob.createdAt))
-
-  return new Response(
-    JSON.stringify({
-      document: {
-        id: updated.id,
-        name: updated.name,
-        mimeType: updated.mimeType,
-        fileSize: updated.fileSize,
-        isFavorite: updated.isFavorite,
-        archivedAt: updated.archivedAt,
-        trashedAt: updated.trashedAt,
-        createdAt: updated.createdAt,
-        updatedAt: updated.updatedAt,
-        textContent: updated.textContent,
-        folder: docFolder,
-        tags: updatedTags,
-        processingJobs,
-      },
-    }),
-    { headers: { 'Content-Type': 'application/json' } },
-  )
+  return documentResponse(updated)
 }

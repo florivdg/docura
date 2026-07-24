@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   CheckCircle2,
   CircleAlert,
   Clock,
   FileText,
   Image,
   Loader2,
+  Minus,
   RotateCcw,
   SearchX,
   Star,
@@ -28,6 +31,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -51,6 +55,42 @@ const emit = defineEmits<{
   permanentDelete: [id: string]
 }>()
 
+const selectedIds = defineModel<string[]>('selectedIds', { required: true })
+
+const headerState = computed<boolean | 'indeterminate'>(() => {
+  const selected = new Set(selectedIds.value)
+  const docs = props.documents
+  if (docs.length > 0 && docs.every((doc) => selected.has(doc.id))) return true
+  return docs.some((doc) => selected.has(doc.id)) ? 'indeterminate' : false
+})
+
+function isSelected(id: string): boolean {
+  return selectedIds.value.includes(id)
+}
+
+function toggleAll(value: boolean | 'indeterminate') {
+  if (value === true) {
+    const visibleIds = props.documents.map((doc) => doc.id)
+    selectedIds.value = [
+      ...selectedIds.value.filter((id) => !visibleIds.includes(id)),
+      ...visibleIds,
+    ]
+  } else {
+    const visibleIds = new Set(props.documents.map((doc) => doc.id))
+    selectedIds.value = selectedIds.value.filter((id) => !visibleIds.has(id))
+  }
+}
+
+function toggleRow(id: string, value: boolean | 'indeterminate') {
+  if (value === true) {
+    if (!selectedIds.value.includes(id)) {
+      selectedIds.value = [...selectedIds.value, id]
+    }
+  } else {
+    selectedIds.value = selectedIds.value.filter((selected) => selected !== id)
+  }
+}
+
 function sortIcon(column: string) {
   if (props.sortColumn !== column) return ArrowUpDown
   return props.sortOrder === 'asc' ? ArrowUp : ArrowDown
@@ -73,6 +113,18 @@ function formatDate(dateStr: string): string {
   return dateFormatter.format(new Date(dateStr))
 }
 
+// Date-only values (YYYY-MM-DD) are rendered in UTC so the day never shifts
+const dateOnlyFormatter = new Intl.DateTimeFormat('de-DE', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+function formatDateOnly(dateStr: string): string {
+  return dateOnlyFormatter.format(new Date(`${dateStr}T00:00:00Z`))
+}
+
 function emptyStateText(): string {
   switch (props.view) {
     case 'trash':
@@ -86,13 +138,26 @@ function emptyStateText(): string {
   }
 }
 
-const colCount = () => (props.view === 'trash' ? 8 : 6)
+const colCount = () => (props.view === 'trash' ? 10 : 9)
 </script>
 
 <template>
   <Table>
     <TableHeader>
       <TableRow>
+        <TableHead class="w-[1%] pr-0">
+          <Checkbox
+            :model-value="headerState"
+            :disabled="props.documents.length === 0"
+            aria-label="Alle Dokumente auswählen"
+            @update:model-value="toggleAll"
+          >
+            <template #default="{ state }">
+              <Minus v-if="state === 'indeterminate'" class="size-3.5" />
+              <Check v-else class="size-3.5" />
+            </template>
+          </Checkbox>
+        </TableHead>
         <TableHead :aria-sort="ariaSort('name')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
@@ -102,6 +167,7 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
             Name <component :is="sortIcon('name')" class="size-3.5" />
           </button>
         </TableHead>
+        <TableHead>Korrespondent</TableHead>
         <TableHead>Ordner</TableHead>
         <TableHead>Tags</TableHead>
         <TableHead :aria-sort="ariaSort('fileSize')">
@@ -114,6 +180,7 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
           </button>
         </TableHead>
         <TableHead>Status</TableHead>
+        <TableHead>Belegdatum</TableHead>
         <TableHead :aria-sort="ariaSort('createdAt')">
           <button
             class="hover:text-foreground inline-flex items-center gap-1 transition-colors"
@@ -136,12 +203,14 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
     <TableBody>
       <template v-if="props.loading">
         <TableRow v-for="i in 5" :key="i">
+          <TableCell><Skeleton class="size-4 rounded-[4px]" /></TableCell>
           <TableCell>
             <div class="flex items-center gap-2">
               <Skeleton class="h-4 w-4" />
               <Skeleton class="h-4 w-32" />
             </div>
           </TableCell>
+          <TableCell><Skeleton class="h-4 w-24" /></TableCell>
           <TableCell><Skeleton class="h-4 w-20" /></TableCell>
           <TableCell>
             <div class="flex gap-1">
@@ -151,6 +220,7 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
           </TableCell>
           <TableCell><Skeleton class="h-4 w-16" /></TableCell>
           <TableCell><Skeleton class="h-5 w-24" /></TableCell>
+          <TableCell><Skeleton class="h-4 w-20" /></TableCell>
           <TableCell><Skeleton class="h-4 w-28" /></TableCell>
           <TableCell v-if="props.view === 'trash'">
             <Skeleton class="h-8 w-20" />
@@ -175,7 +245,18 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
         </TableEmpty>
       </template>
       <template v-else>
-        <TableRow v-for="doc in props.documents" :key="doc.id">
+        <TableRow
+          v-for="doc in props.documents"
+          :key="doc.id"
+          :data-state="isSelected(doc.id) ? 'selected' : undefined"
+        >
+          <TableCell class="pr-0" @click.stop>
+            <Checkbox
+              :model-value="isSelected(doc.id)"
+              :aria-label="`${doc.name} auswählen`"
+              @update:model-value="(value) => toggleRow(doc.id, value)"
+            />
+          </TableCell>
           <TableCell>
             <div class="flex items-center gap-2">
               <Star
@@ -194,6 +275,12 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
                 {{ doc.name }}
               </a>
             </div>
+          </TableCell>
+          <TableCell>
+            <span v-if="doc.correspondentName">{{
+              doc.correspondentName
+            }}</span>
+            <span v-else class="text-muted-foreground">—</span>
           </TableCell>
           <TableCell>
             <span v-if="doc.folderName">{{ doc.folderName }}</span>
@@ -288,6 +375,12 @@ const colCount = () => (props.view === 'trash' ? 8 : 6)
                 }}
               </Badge>
             </template>
+            <span v-else class="text-muted-foreground">—</span>
+          </TableCell>
+          <TableCell class="whitespace-nowrap">
+            <span v-if="doc.documentDate">{{
+              formatDateOnly(doc.documentDate)
+            }}</span>
             <span v-else class="text-muted-foreground">—</span>
           </TableCell>
           <TableCell class="whitespace-nowrap">

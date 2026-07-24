@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/db'
 import {
+  correspondent,
   document,
   documentTag,
   folder,
@@ -27,6 +28,8 @@ export const GET: APIRoute = async ({ url }) => {
     url.searchParams.get('folderIds')?.split(',').filter(Boolean) ?? []
   const tagIds =
     url.searchParams.get('tagIds')?.split(',').filter(Boolean) ?? []
+  const correspondentIds =
+    url.searchParams.get('correspondentIds')?.split(',').filter(Boolean) ?? []
   const statuses =
     url.searchParams.get('status')?.split(',').filter(Boolean) ?? []
 
@@ -40,6 +43,13 @@ export const GET: APIRoute = async ({ url }) => {
   if (tagIds.some((id) => !isValidUUID(id))) {
     return new Response(
       JSON.stringify({ error: 'Ungültige Tag-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (correspondentIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Korrespondenten-ID in Filter' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     )
   }
@@ -77,6 +87,10 @@ export const GET: APIRoute = async ({ url }) => {
 
   if (folderIds.length > 0) {
     conditions.push(inArray(document.folderId, folderIds))
+  }
+
+  if (correspondentIds.length > 0) {
+    conditions.push(inArray(document.correspondentId, correspondentIds))
   }
 
   if (tagIds.length > 0) {
@@ -126,13 +140,16 @@ export const GET: APIRoute = async ({ url }) => {
       trashedAt: document.trashedAt,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
+      documentDate: document.documentDate,
       folderName: folder.name,
+      correspondentName: correspondent.name,
       processingStatus: processingJob.status,
       processingStep: processingJob.step,
       processingError: processingJob.errorMessage,
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
+    .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
     .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,

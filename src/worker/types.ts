@@ -2,6 +2,8 @@ export interface LlmAnalysisResult {
   title: string | null
   tags: string[]
   folderSuggestion: string | null
+  documentDate: string | null
+  correspondent: string | null
 }
 
 export type ProcessingStep =
