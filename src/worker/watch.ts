@@ -12,7 +12,11 @@ import {
 import { extname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { db } from '@/db'
+import { findDocumentBySha256 } from '@/db/queries'
 import { document, processingJob } from '@/db/schema/documents'
+import { isEnoent } from '@/lib/api-utils'
+import { isUniqueViolation } from '@/lib/db-errors'
+import { computeFileSha256 } from '@/lib/hash'
 import { EXT_TO_MIME, validateMagicBytes } from '@/lib/file-validation'
 import { WORKER_CONFIG } from '@/worker/config'
 
@@ -24,10 +28,6 @@ const activeIngests = new Set<Promise<void>>()
 let rescanTimer: ReturnType<typeof setInterval> | null = null
 
 const MAGIC_HEADER_SIZE = 12 // WebP needs offset 8 + 4 bytes
-
-function isEnoent(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException).code === 'ENOENT'
-}
 
 function isSupportedFile(filename: string): boolean {
   if (filename.startsWith('.')) return false
@@ -149,6 +149,19 @@ async function ingestFile(filename: string): Promise<void> {
         return
       }
 
+      const sha256 = await computeFileSha256(tempPath)
+
+      const duplicate = await findDocumentBySha256(sha256)
+      if (duplicate) {
+        console.log(
+          `[Watch] Duplikat übersprungen (bereits vorhanden): ${filename}`,
+        )
+        if (!pendingRerun.has(filename)) {
+          await unlink(filePath).catch(() => {})
+        }
+        return
+      }
+
       await rename(tempPath, storagePath)
       if (!pendingRerun.has(filename)) {
         await unlink(filePath).catch(() => {})
@@ -163,6 +176,7 @@ async function ingestFile(filename: string): Promise<void> {
               mimeType,
               fileSize: actualSize,
               storagePath: storageName,
+              sha256,
               folderId: null,
             })
             .returning()
@@ -173,6 +187,15 @@ async function ingestFile(filename: string): Promise<void> {
         console.log(`[Watch] Datei importiert: ${filename} -> ${storageName}`)
       } catch (dbErr) {
         await unlink(storagePath).catch(() => {})
+
+        // Concurrent ingest of the same content won the unique index race
+        if (isUniqueViolation(dbErr)) {
+          console.log(
+            `[Watch] Duplikat übersprungen (bereits vorhanden): ${filename}`,
+          )
+          return
+        }
+
         throw dbErr
       }
     } finally {

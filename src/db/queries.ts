@@ -20,6 +20,29 @@ export function viewConditions(view: string): SQL[] {
   }
 }
 
+export type DuplicateDocument = {
+  id: string
+  name: string
+  trashedAt: Date | null
+}
+
+/** Findet das Dokument, das den Inhalts-Hash bereits belegt (Dedup). */
+export async function findDocumentBySha256(
+  sha256: string,
+): Promise<DuplicateDocument | undefined> {
+  const [existing] = await db
+    .select({
+      id: document.id,
+      name: document.name,
+      trashedAt: document.trashedAt,
+    })
+    .from(document)
+    .where(eq(document.sha256, sha256))
+    .limit(1)
+
+  return existing
+}
+
 export function latestJobPerDoc() {
   return db
     .select({

@@ -20,5 +20,13 @@ export default defineConfig({
     server: {
       allowedHosts: ['docura.local'],
     },
+    ssr: {
+      external: ['bun'],
+    },
+    build: {
+      rolldownOptions: {
+        external: ['bun'],
+      },
+    },
   },
 })

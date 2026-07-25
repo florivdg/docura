@@ -6,7 +6,20 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { document, folder, processingJob } from '@/db/schema/documents'
 import { isValidUUID } from '@/lib/api-utils'
+import { isUniqueViolation } from '@/lib/db-errors'
+import { computeSha256 } from '@/lib/hash'
 import { ALLOWED_MIME_TYPES, validateMagicBytes } from '@/lib/file-validation'
+import { findDocumentBySha256, type DuplicateDocument } from '@/db/queries'
+
+function duplicateResponse(existing?: DuplicateDocument): Response {
+  return new Response(
+    JSON.stringify({
+      error: 'Ein identisches Dokument ist bereits vorhanden',
+      duplicate: existing ?? null,
+    }),
+    { status: 409, headers: { 'Content-Type': 'application/json' } },
+  )
+}
 
 export const POST: APIRoute = async ({ request }) => {
   const uploadDir = process.env.UPLOAD_DIR || './uploads'
@@ -83,6 +96,13 @@ export const POST: APIRoute = async ({ request }) => {
     )
   }
 
+  const sha256 = computeSha256(buffer)
+
+  const duplicate = await findDocumentBySha256(sha256)
+  if (duplicate) {
+    return duplicateResponse(duplicate)
+  }
+
   try {
     await writeFile(storagePath, buffer)
 
@@ -94,6 +114,7 @@ export const POST: APIRoute = async ({ request }) => {
           mimeType: file.type,
           fileSize: file.size,
           storagePath: filename,
+          sha256,
           folderId: folderId || null,
         })
         .returning()
@@ -112,6 +133,12 @@ export const POST: APIRoute = async ({ request }) => {
     })
   } catch (error) {
     await unlink(storagePath).catch(() => {})
+
+    // Concurrent upload of the same content won the unique index race
+    if (isUniqueViolation(error)) {
+      return duplicateResponse(await findDocumentBySha256(sha256))
+    }
+
     throw error
   }
 }

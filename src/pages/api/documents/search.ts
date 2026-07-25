@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
 import {
+  correspondent,
   document,
   documentTag,
   folder,
@@ -17,6 +18,7 @@ import { latestJobPerDoc, viewConditions } from '@/db/queries'
 interface FilterParams {
   folderIds: string[]
   tagIds: string[]
+  correspondentIds: string[]
   statuses: string[]
   view: string
 }
@@ -60,6 +62,8 @@ export const GET: APIRoute = async ({ url }) => {
     url.searchParams.get('folderIds')?.split(',').filter(Boolean) ?? []
   const tagIds =
     url.searchParams.get('tagIds')?.split(',').filter(Boolean) ?? []
+  const correspondentIds =
+    url.searchParams.get('correspondentIds')?.split(',').filter(Boolean) ?? []
   const statuses =
     url.searchParams.get('status')?.split(',').filter(Boolean) ?? []
 
@@ -73,6 +77,13 @@ export const GET: APIRoute = async ({ url }) => {
   if (tagIds.some((id) => !isValidUUID(id))) {
     return new Response(
       JSON.stringify({ error: 'Ungültige Tag-ID in Filter' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (correspondentIds.some((id) => !isValidUUID(id))) {
+    return new Response(
+      JSON.stringify({ error: 'Ungültige Korrespondenten-ID in Filter' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     )
   }
@@ -91,7 +102,13 @@ export const GET: APIRoute = async ({ url }) => {
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     )
   }
-  const filterParams: FilterParams = { folderIds, tagIds, statuses, view }
+  const filterParams: FilterParams = {
+    folderIds,
+    tagIds,
+    correspondentIds,
+    statuses,
+    view,
+  }
 
   if (!query) {
     return new Response(
@@ -135,6 +152,12 @@ function buildFilterConditions(filterParams: FilterParams): SQL[] {
 
   if (filterParams.folderIds.length > 0) {
     conditions.push(inArray(document.folderId, filterParams.folderIds))
+  }
+
+  if (filterParams.correspondentIds.length > 0) {
+    conditions.push(
+      inArray(document.correspondentId, filterParams.correspondentIds),
+    )
   }
 
   if (filterParams.tagIds.length > 0) {
@@ -343,7 +366,9 @@ async function handleFulltextSearch(
       fileSize: document.fileSize,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
+      documentDate: document.documentDate,
       folderName: folder.name,
+      correspondentName: correspondent.name,
       headline: headlineSql,
       relevance: relevanceScore,
       processingStatus: processingJob.status,
@@ -355,6 +380,7 @@ async function handleFulltextSearch(
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
+    .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
     .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,
@@ -432,7 +458,9 @@ async function handleSemanticSearch(
       fileSize: document.fileSize,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
+      documentDate: document.documentDate,
       folderName: folder.name,
+      correspondentName: correspondent.name,
       similarity:
         sql<number>`1 - (${document.embedding} <=> ${vectorLiteral}::vector)`.as(
           'similarity',
@@ -446,6 +474,7 @@ async function handleSemanticSearch(
     })
     .from(document)
     .leftJoin(folder, eq(document.folderId, folder.id))
+    .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
     .leftJoin(latestJob, eq(document.id, latestJob.documentId))
     .leftJoin(
       processingJob,

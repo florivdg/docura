@@ -22,7 +22,9 @@ export interface DocumentRow {
   fileSize: number
   createdAt: string
   updatedAt: string
+  documentDate: string | null
   folderName: string | null
+  correspondentName: string | null
   tags: DocumentTag[]
   processingStatus: string | null
   processingStep: string | null
@@ -52,6 +54,8 @@ function parseUrlState() {
       : 'fulltext') as 'fulltext' | 'semantic',
     folderIds: params.get('folders')?.split(',').filter(Boolean) ?? [],
     tagIds: params.get('tags')?.split(',').filter(Boolean) ?? [],
+    correspondentIds:
+      params.get('correspondents')?.split(',').filter(Boolean) ?? [],
     statuses: params.get('status')?.split(',').filter(Boolean) ?? [],
     sortColumn:
       sortParam && VALID_SORT_COLUMNS.includes(sortParam as SortColumn)
@@ -75,6 +79,7 @@ export function useDocumentsFilter() {
   const searchMode = ref(initial.searchMode)
   const selectedFolderIds = ref(initial.folderIds)
   const selectedTagIds = ref(initial.tagIds)
+  const selectedCorrespondentIds = ref(initial.correspondentIds)
   const selectedStatuses = ref(initial.statuses)
 
   const sortColumn = ref<SortColumn | null>(initial.sortColumn)
@@ -98,6 +103,7 @@ export function useDocumentsFilter() {
       query.value.trim().length > 0 ||
       selectedFolderIds.value.length > 0 ||
       selectedTagIds.value.length > 0 ||
+      selectedCorrespondentIds.value.length > 0 ||
       selectedStatuses.value.length > 0 ||
       sortColumn.value !== null,
   )
@@ -112,6 +118,9 @@ export function useDocumentsFilter() {
     }
     if (selectedTagIds.value.length > 0) {
       params.set('tagIds', selectedTagIds.value.join(','))
+    }
+    if (selectedCorrespondentIds.value.length > 0) {
+      params.set('correspondentIds', selectedCorrespondentIds.value.join(','))
     }
     if (selectedStatuses.value.length > 0) {
       params.set('status', selectedStatuses.value.join(','))
@@ -172,6 +181,7 @@ export function useDocumentsFilter() {
     query.value = ''
     selectedFolderIds.value = []
     selectedTagIds.value = []
+    selectedCorrespondentIds.value = []
     selectedStatuses.value = []
     sortColumn.value = null
     sortOrder.value = 'desc'
@@ -229,7 +239,12 @@ export function useDocumentsFilter() {
 
   // Watch filters - immediate fetch
   watch(
-    [selectedFolderIds, selectedTagIds, selectedStatuses],
+    [
+      selectedFolderIds,
+      selectedTagIds,
+      selectedCorrespondentIds,
+      selectedStatuses,
+    ],
     () => {
       if (clearingFilters) return
       currentPage.value = 1
@@ -262,6 +277,8 @@ export function useDocumentsFilter() {
       params.set('folders', selectedFolderIds.value.join(','))
     if (selectedTagIds.value.length > 0)
       params.set('tags', selectedTagIds.value.join(','))
+    if (selectedCorrespondentIds.value.length > 0)
+      params.set('correspondents', selectedCorrespondentIds.value.join(','))
     if (selectedStatuses.value.length > 0)
       params.set('status', selectedStatuses.value.join(','))
     if (sortColumn.value) {
@@ -278,24 +295,25 @@ export function useDocumentsFilter() {
     history.replaceState(null, '', newUrl)
   }
 
-  watch(
-    [
-      view,
-      query,
-      searchMode,
-      selectedFolderIds,
-      selectedTagIds,
-      selectedStatuses,
-      sortColumn,
-      sortOrder,
-      currentPage,
-      pageSize,
-    ],
-    () => syncToUrl(),
-    {
-      deep: true,
-    },
-  )
+  // Every input that changes the fetched result set — also the tuple consumers
+  // watch to invalidate result-bound state (e.g. the bulk selection).
+  const requestInputs = [
+    view,
+    query,
+    searchMode,
+    selectedFolderIds,
+    selectedTagIds,
+    selectedCorrespondentIds,
+    selectedStatuses,
+    sortColumn,
+    sortOrder,
+    currentPage,
+    pageSize,
+  ]
+
+  watch(requestInputs, () => syncToUrl(), {
+    deep: true,
+  })
 
   return {
     view,
@@ -303,6 +321,7 @@ export function useDocumentsFilter() {
     searchMode,
     selectedFolderIds,
     selectedTagIds,
+    selectedCorrespondentIds,
     selectedStatuses,
     documents,
     loading,
@@ -317,5 +336,6 @@ export function useDocumentsFilter() {
     totalPages,
     toggleSort,
     goToPage,
+    requestInputs,
   }
 }

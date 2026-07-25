@@ -16,6 +16,26 @@ export function safePath(uploadDir: string, storagePath: string): string {
   return resolvedPath
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Checks for an ISO date string (YYYY-MM-DD) that is a real calendar date. */
+export function isValidIsoDate(value: string): boolean {
+  if (!ISO_DATE_RE.test(value)) return false
+
+  const [year, month, day] = value.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  )
+}
+
+export function isEnoent(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT'
+}
+
 export async function parseJsonBody<T>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import {
+  Building2,
   Check,
   CircleDot,
   FolderOpen,
@@ -10,7 +11,7 @@ import {
   Text,
   X,
 } from 'lucide-vue-next'
-import { apiFetch } from '@/lib/api-fetch'
+import { useMetadataOptions } from '@/composables/useMetadataOptions'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -40,24 +41,15 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-interface FolderOption {
-  id: string
-  name: string
-  parentId: string | null
-}
-
-interface TagOption {
-  id: string
-  name: string
-  color: string | null
-}
-
 const query = defineModel<string>('query', { required: true })
 const searchMode = defineModel<'fulltext' | 'semantic'>('searchMode', {
   required: true,
 })
 const folderIds = defineModel<string[]>('folderIds', { required: true })
 const tagIds = defineModel<string[]>('tagIds', { required: true })
+const correspondentIds = defineModel<string[]>('correspondentIds', {
+  required: true,
+})
 const statuses = defineModel<string[]>('statuses', { required: true })
 
 const props = defineProps<{
@@ -68,11 +60,11 @@ const emit = defineEmits<{
   clear: []
 }>()
 
-const folders = ref<FolderOption[]>([])
-const tags = ref<TagOption[]>([])
+const { folders, tags, correspondents, ensureLoaded } = useMetadataOptions()
 
 const folderPopoverOpen = ref(false)
 const tagPopoverOpen = ref(false)
+const correspondentPopoverOpen = ref(false)
 
 const statusOptions = [
   { value: 'pending', label: 'Ausstehend' },
@@ -99,6 +91,15 @@ function toggleTag(id: string) {
   }
 }
 
+function toggleCorrespondent(id: string) {
+  const idx = correspondentIds.value.indexOf(id)
+  if (idx >= 0) {
+    correspondentIds.value = correspondentIds.value.filter((c) => c !== id)
+  } else {
+    correspondentIds.value = [...correspondentIds.value, id]
+  }
+}
+
 function toggleStatus(value: string) {
   const idx = statuses.value.indexOf(value)
   if (idx >= 0) {
@@ -108,23 +109,8 @@ function toggleStatus(value: string) {
   }
 }
 
-onMounted(async () => {
-  try {
-    const [foldersRes, tagsRes] = await Promise.all([
-      apiFetch('/api/folders/all'),
-      apiFetch('/api/tags'),
-    ])
-    const foldersData = await foldersRes.json()
-    const tagsData = await tagsRes.json()
-    folders.value = foldersData.folders ?? []
-    tags.value = (tagsData.tags ?? []).map((t: any) => ({
-      id: t.id,
-      name: t.name,
-      color: t.color,
-    }))
-  } catch (err) {
-    console.error('Filter-Daten laden fehlgeschlagen:', err)
-  }
+onMounted(() => {
+  void ensureLoaded()
 })
 </script>
 
@@ -226,6 +212,57 @@ onMounted(async () => {
                     "
                   />
                   {{ f.name }}
+                </CommandItem>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      <!-- Correspondent filter -->
+      <Popover v-model:open="correspondentPopoverOpen">
+        <PopoverTrigger as-child>
+          <Button
+            variant="outline"
+            size="default"
+            :class="
+              correspondentIds.length > 0
+                ? 'border-primary/50 bg-primary/5'
+                : ''
+            "
+          >
+            <Building2 class="size-3.5" />
+            Korrespondent
+            <Badge
+              v-if="correspondentIds.length > 0"
+              variant="secondary"
+              class="ml-1 h-5 px-1.5 text-[10px]"
+            >
+              {{ correspondentIds.length }}
+            </Badge>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" class="w-[220px] p-0">
+          <Command>
+            <CommandInput placeholder="Suchen…" />
+            <CommandList>
+              <CommandEmpty>Nicht gefunden</CommandEmpty>
+              <CommandGroup>
+                <CommandItem
+                  v-for="c in correspondents"
+                  :key="c.id"
+                  :value="c.name"
+                  @select.prevent="toggleCorrespondent(c.id)"
+                >
+                  <Check
+                    class="size-3.5"
+                    :class="
+                      correspondentIds.includes(c.id)
+                        ? 'opacity-100'
+                        : 'opacity-0'
+                    "
+                  />
+                  {{ c.name }}
                 </CommandItem>
               </CommandGroup>
             </CommandList>
