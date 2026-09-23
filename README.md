@@ -4,7 +4,7 @@ A German-language shared document management system. All authenticated users sha
 
 ## Tech Stack
 
-- **Astro 5** — SSR framework with Node adapter
+- **Astro 7** — SSR framework with Node adapter
 - **Vue 3** — Interactive components
 - **Better Auth** — Authentication with passkey (WebAuthn) support
 - **Drizzle ORM** — Database toolkit with PostgreSQL via Bun's native SQL driver

@@ -31,23 +31,34 @@ export async function chatWithOllama(
   system: string,
   user: string,
 ): Promise<string> {
-  const response = await fetchWithTimeout(
-    `${WORKER_CONFIG.ollamaUrl}/api/chat`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: WORKER_CONFIG.ollamaLlmModel,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        stream: false,
-        format: 'json',
-      }),
-    },
-    WORKER_CONFIG.ollamaTimeoutMs,
-  )
+  const request = (structured: boolean) =>
+    fetchWithTimeout(
+      `${WORKER_CONFIG.ollamaUrl}/api/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: WORKER_CONFIG.ollamaLlmModel,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          stream: false,
+          ...(structured ? { format: 'json' } : {}),
+        }),
+      },
+      WORKER_CONFIG.ollamaTimeoutMs,
+    )
+
+  let response = await request(true)
+  if (response.status === 501) {
+    const error = (await response.json().catch(() => null)) as {
+      error?: string
+    } | null
+    if (error?.error === 'structured output is unavailable') {
+      response = await request(false)
+    }
+  }
 
   if (!response.ok) {
     throw new Error(
