@@ -36,6 +36,7 @@ export const session = pgTable(
       .notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
+    impersonatedBy: text('impersonated_by'),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
