@@ -16,10 +16,7 @@ export const EXT_TO_MIME: Record<string, string> = {
   tif: 'image/tiff',
 }
 
-export const MAGIC_BYTES: Record<
-  string,
-  { offset: number; bytes: number[] }[]
-> = {
+const MAGIC_BYTES: Record<string, { offset: number; bytes: number[] }[]> = {
   'application/pdf': [{ offset: 0, bytes: [0x25, 0x50, 0x44, 0x46] }], // %PDF
   'image/png': [{ offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47] }], // .PNG
   'image/jpeg': [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }], // FFD8FF
@@ -32,7 +29,7 @@ export const MAGIC_BYTES: Record<
   ],
 }
 
-export const MAGIC_BYTES_TIFF_BE = [0x4d, 0x4d, 0x00, 0x2a] // MM.*
+const MAGIC_BYTES_TIFF_BE = [0x4d, 0x4d, 0x00, 0x2a] // MM.*
 
 export function validateMagicBytes(buffer: Buffer, mimeType: string): boolean {
   const signatures = MAGIC_BYTES[mimeType]

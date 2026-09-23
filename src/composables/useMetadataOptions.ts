@@ -1,19 +1,19 @@
 import { ref } from 'vue'
 import { apiFetch } from '@/lib/api-fetch'
 
-export interface FolderOption {
+interface FolderOption {
   id: string
   name: string
   parentId: string | null
 }
 
-export interface TagOption {
+interface TagOption {
   id: string
   name: string
   color: string | null
 }
 
-export interface CorrespondentOption {
+interface CorrespondentOption {
   id: string
   name: string
 }

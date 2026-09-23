@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { documentTag, tag } from '@/db/schema/documents'
 
-export async function findOrCreateTag(
+async function findOrCreateTag(
   tagName: string,
   onlyExisting = false,
 ): Promise<{ id: string } | null> {
