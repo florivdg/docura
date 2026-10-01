@@ -23,7 +23,7 @@ export function validateVector(vector: unknown): number[] {
   return vector as number[]
 }
 
-export function toPgVectorLiteral(vector: number[]): string {
+function toPgVectorLiteral(vector: number[]): string {
   return `[${vector.join(',')}]`
 }
 

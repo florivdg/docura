@@ -29,5 +29,8 @@ __pycache__/
 # uploaded documents
 uploads/
 
+# fallow analysis cache
+.fallow/
+
 # watch folder
 watch/
