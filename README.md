@@ -63,6 +63,10 @@ All commands are run from the project root:
 | `bun --bun run preview`     | Preview production build                |
 | `bun run db:generate`       | Generate Drizzle migrations from schema |
 | `bun run db:migrate`        | Run database migrations                 |
+| `bun run test`              | Run unit and Vue interaction tests      |
+| `bun run test:coverage`     | Generate Istanbul and LCOV coverage     |
+| `bun run fallow`            | Audit changes against `origin/main`     |
+| `bun run fallow:health`     | Report whole-project health             |
 | `bun run lint --type-aware` | Run OxLint                              |
 | `bun run astro check`       | Run Astro project checks                |
 
@@ -77,3 +81,17 @@ It exists solely because Drizzle Kit CLI commands (`db:generate`, `db:migrate`, 
 Upstream issue: [drizzle-orm#4122](https://github.com/drizzle-team/drizzle-orm/issues/4122)
 
 This dependency can be removed once Drizzle Kit adds native Bun SQL support.
+
+## Code quality
+
+Run `bun run test:coverage` before `bun run fallow` so Fallow can use current
+Istanbul coverage from `coverage/coverage-final.json`. Coverage output is ignored
+by Git. Tests use Vitest and happy-dom; OCR client tests use Node's native web APIs.
+Database, Ollama and Bun-specific integrations are mocked in unit tests, so a
+passing suite does not replace an end-to-end check against running services.
+
+GitHub Actions checks types, lint, tests, build, the strict changed-code audit,
+and a whole-project health floor of 88. It publishes health, duplication,
+dead-code and coverage reports as artifacts. The browser import boundary prevents
+runtime dependencies on database and worker modules while permitting shared
+helpers and type-only imports.

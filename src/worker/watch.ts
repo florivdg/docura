@@ -1,23 +1,12 @@
+import { ingestWatchFile } from '@/worker/ingest-watch-file'
 import { watch, type FSWatcher } from 'node:fs'
-import {
-  copyFile,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  rename,
-  stat,
-  unlink,
-} from 'node:fs/promises'
-import { extname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { mkdir, readdir, stat } from 'node:fs/promises'
+import { extname } from 'node:path'
 import { db } from '@/db'
 import { findDocumentBySha256 } from '@/db/queries'
 import { document, processingJob } from '@/db/schema/documents'
 import { isEnoent } from '@/lib/api-utils'
-import { isUniqueViolation } from '@/lib/db-errors'
-import { computeFileSha256 } from '@/lib/hash'
-import { EXT_TO_MIME, validateMagicBytes } from '@/lib/file-validation'
+import { EXT_TO_MIME } from '@/lib/file-validation'
 import { WORKER_CONFIG } from '@/worker/config'
 
 let watcher: FSWatcher | null = null
@@ -26,8 +15,6 @@ const processingFiles = new Set<string>()
 const pendingRerun = new Set<string>()
 const activeIngests = new Set<Promise<void>>()
 let rescanTimer: ReturnType<typeof setInterval> | null = null
-
-const MAGIC_HEADER_SIZE = 12 // WebP needs offset 8 + 4 bytes
 
 function isSupportedFile(filename: string): boolean {
   if (filename.startsWith('.')) return false
@@ -73,134 +60,19 @@ async function ingestFile(filename: string): Promise<void> {
   }
   processingFiles.add(filename)
 
-  const filePath = join(WORKER_CONFIG.watchDir, filename)
-  const ext = extname(filename).toLowerCase().slice(1)
-  const mimeType = EXT_TO_MIME[ext]
-
   try {
-    if (!mimeType) {
-      console.log(
-        `[Watch] Nicht unterstützte Erweiterung, übersprungen: ${filename}`,
-      )
-      return
-    }
-
-    let fileStat
-    try {
-      fileStat = await lstat(filePath)
-    } catch (err: unknown) {
-      if (isEnoent(err)) {
-        console.log(`[Watch] Datei verschwunden: ${filename}`)
-        return
-      }
-      throw err
-    }
-    if (fileStat.isSymbolicLink()) {
-      console.log(`[Watch] Symlinks werden nicht unterstützt: ${filename}`)
-      return
-    }
-
-    const fileSize = await waitForStability(filePath)
-    if (fileSize < 0) {
-      console.log(
-        `[Watch] Datei nicht verfügbar oder nicht stabil: ${filename}`,
-      )
-      return
-    }
-
-    const storageName = `${randomUUID()}.${ext}`
-    const tempPath = join(WORKER_CONFIG.uploadDir, `${storageName}.tmp`)
-    const storagePath = join(WORKER_CONFIG.uploadDir, storageName)
-
-    try {
-      await copyFile(filePath, tempPath)
-    } catch (err: unknown) {
-      if (isEnoent(err)) {
-        console.log(`[Watch] Datei verschwunden: ${filename}`)
-        return
-      }
-      throw err
-    }
-
-    try {
-      const tempStat = await stat(tempPath)
-      const actualSize = tempStat.size
-
-      const maxBytes = WORKER_CONFIG.maxFileSizeMB * 1024 * 1024
-      if (actualSize > maxBytes) {
-        console.warn(
-          `[Watch] Datei zu groß (${(actualSize / 1024 / 1024).toFixed(1)} MB > ${WORKER_CONFIG.maxFileSizeMB} MB), übersprungen: ${filename}`,
-        )
-        return
-      }
-
-      const headerBuffer = Buffer.alloc(MAGIC_HEADER_SIZE)
-      const fileHandle = await open(tempPath, 'r')
-      try {
-        await fileHandle.read(headerBuffer, 0, MAGIC_HEADER_SIZE, 0)
-      } finally {
-        await fileHandle.close()
-      }
-
-      if (!validateMagicBytes(headerBuffer, mimeType)) {
-        console.warn(
-          `[Watch] Magic-Bytes stimmen nicht mit Erweiterung überein, übersprungen: ${filename}`,
-        )
-        return
-      }
-
-      const sha256 = await computeFileSha256(tempPath)
-
-      const duplicate = await findDocumentBySha256(sha256)
-      if (duplicate) {
-        console.log(
-          `[Watch] Duplikat übersprungen (bereits vorhanden): ${filename}`,
-        )
-        if (!pendingRerun.has(filename)) {
-          await unlink(filePath).catch(() => {})
-        }
-        return
-      }
-
-      await rename(tempPath, storagePath)
-      if (!pendingRerun.has(filename)) {
-        await unlink(filePath).catch(() => {})
-      }
-
-      try {
+    await ingestWatchFile(filename, {
+      ...WORKER_CONFIG,
+      isPending: () => pendingRerun.has(filename),
+      waitForStability,
+      findDuplicate: findDocumentBySha256,
+      persist: async (values) => {
         await db.transaction(async (tx) => {
-          const [doc] = await tx
-            .insert(document)
-            .values({
-              name: filename,
-              mimeType,
-              fileSize: actualSize,
-              storagePath: storageName,
-              sha256,
-              folderId: null,
-            })
-            .returning()
-
+          const [doc] = await tx.insert(document).values(values).returning()
           await tx.insert(processingJob).values({ documentId: doc.id })
         })
-
-        console.log(`[Watch] Datei importiert: ${filename} -> ${storageName}`)
-      } catch (dbErr) {
-        await unlink(storagePath).catch(() => {})
-
-        // Concurrent ingest of the same content won the unique index race
-        if (isUniqueViolation(dbErr)) {
-          console.log(
-            `[Watch] Duplikat übersprungen (bereits vorhanden): ${filename}`,
-          )
-          return
-        }
-
-        throw dbErr
-      }
-    } finally {
-      await unlink(tempPath).catch(() => {})
-    }
+      },
+    })
   } catch (err: unknown) {
     if (isEnoent(err)) {
       console.log(

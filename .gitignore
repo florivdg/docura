@@ -34,3 +34,10 @@ uploads/
 
 # watch folder
 watch/
+
+# test coverage reports
+coverage/
+
+# local browser checks and CI report output
+.playwright-cli/
+quality-reports/

@@ -1,4 +1,11 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import {
+  afterEach,
+  describe,
+  expect,
+  vi,
+  test,
+  type MockInstance,
+} from 'vitest'
 
 import { chatWithOllama } from '@/worker/clients/ollama'
 
@@ -13,9 +20,7 @@ function chatReply(content: string) {
   return jsonResponse({ message: { role: 'assistant', content } })
 }
 
-function requestBodies(
-  fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>,
-) {
+function requestBodies(fetchSpy: MockInstance<typeof fetch>) {
   return fetchSpy.mock.calls.map(([, init]) =>
     JSON.parse((init as RequestInit).body as string),
   )
@@ -33,14 +38,14 @@ async function chatError(): Promise<() => never> {
 }
 
 describe('chatWithOllama', () => {
-  let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>
+  let fetchSpy: MockInstance<typeof fetch>
 
   afterEach(() => fetchSpy.mockRestore())
 
   test('requests structured JSON output and returns the message content', async () => {
-    fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
-      chatReply('{"a":1}'),
-    )
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(chatReply('{"a":1}'))
 
     expect(await chatWithOllama('system', 'user')).toBe('{"a":1}')
 
@@ -54,7 +59,8 @@ describe('chatWithOllama', () => {
   })
 
   test('retries without structured output when the model does not support it', async () => {
-    fetchSpy = spyOn(globalThis, 'fetch')
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
         jsonResponse({ error: 'structured output is unavailable' }, 501),
       )
@@ -68,18 +74,18 @@ describe('chatWithOllama', () => {
   })
 
   test('does not retry other 501 errors', async () => {
-    fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({ error: 'something else' }, 501),
-    )
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ error: 'something else' }, 501))
 
     expect(await chatError()).toThrow('LLM-Anfrage fehlgeschlagen: 501')
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   test('throws on other HTTP errors', async () => {
-    fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('boom', { status: 500 }),
-    )
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('boom', { status: 500 }))
 
     expect(await chatError()).toThrow('LLM-Anfrage fehlgeschlagen: 500')
   })

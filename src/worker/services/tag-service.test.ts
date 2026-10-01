@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
+import {
+  beforeEach,
+  describe,
+  expect,
+  vi,
+  test,
+  type MockInstance,
+} from 'vitest'
 
 import { tag } from '@/db/schema/documents'
 
@@ -23,23 +30,23 @@ const fakeDb = {
   }),
 }
 
-await mock.module('@/db', () => ({ db: fakeDb }))
+vi.doMock('@/db', () => ({ db: fakeDb }))
 
 const { applyTags } = await import('@/worker/services/tag-service')
 
 describe('applyTags', () => {
-  let createTagMock: ReturnType<typeof mock<typeof createTag>>
-  let linkTagsMock: ReturnType<typeof mock<typeof linkTags>>
-  let warnSpy: ReturnType<typeof spyOn<Console, 'warn'>>
+  let createTagMock: ReturnType<typeof vi.fn<typeof createTag>>
+  let linkTagsMock: ReturnType<typeof vi.fn<typeof linkTags>>
+  let warnSpy: MockInstance<typeof console.warn>
 
   beforeEach(() => {
     selectResults = []
-    createTagMock = mock(async ({ name }) => [{ id: `new-${name}` }])
-    linkTagsMock = mock(async () => {})
+    createTagMock = vi.fn(async ({ name }) => [{ id: `new-${name}` }])
+    linkTagsMock = vi.fn(async () => {})
     createTag = createTagMock
     linkTags = linkTagsMock
-    spyOn(console, 'log').mockImplementation(() => {})
-    warnSpy = spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
   test('links existing tags without creating new ones', async () => {
@@ -71,7 +78,7 @@ describe('applyTags', () => {
 
   test('falls back to the concurrently created tag on a unique violation', async () => {
     selectResults = [[], [{ id: 'tag-race' }]]
-    createTag = mock(async () => {
+    createTag = vi.fn(async () => {
       throw new Error('duplicate key')
     })
 
@@ -83,7 +90,7 @@ describe('applyTags', () => {
   })
 
   test('skips a tag that can neither be created nor found', async () => {
-    createTag = mock(async () => {
+    createTag = vi.fn(async () => {
       throw new Error('insert failed')
     })
 
@@ -97,7 +104,7 @@ describe('applyTags', () => {
 
   test('logs instead of throwing when linking fails', async () => {
     selectResults = [[{ id: 'tag-1' }]]
-    linkTags = mock(async () => {
+    linkTags = vi.fn(async () => {
       throw new Error('db down')
     })
 

@@ -1,0 +1,44 @@
+name: Code quality
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - run: bun run lint --type-aware
+      - run: bun run astro check
+      - run: bunx --no-install vue-tsc --noEmit
+      - run: bun run test:coverage
+      - run: bun run build
+      - name: Enforce changed-code audit
+        run: bun run fallow
+      - name: Enforce project health floor
+        run: bun run fallow:health --min-score 88
+      - name: Save full-project reports
+        if: always()
+        run: |
+          mkdir -p quality-reports
+          bun run fallow:health --report-only --format json --output-file quality-reports/health.json
+          bun run fallow:dupes --format json --output-file quality-reports/dupes.json
+          bun run fallow:dead --format json --output-file quality-reports/dead-code.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-quality
+          path: |
+            quality-reports/
+            coverage/
