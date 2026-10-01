@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import { afterEach, describe, expect, vi, test } from 'vitest'
 
 import { useMetadataOptions } from '@/composables/useMetadataOptions'
 
@@ -13,7 +13,7 @@ const RESPONSES: Record<string, unknown> = {
 }
 
 function mockApi(status = 200) {
-  return spyOn(globalThis, 'fetch').mockImplementation(
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(
     (async (url: string) =>
       new Response(JSON.stringify(RESPONSES[url]), {
         status,
@@ -30,7 +30,7 @@ describe('useMetadataOptions', () => {
 
   test('keeps options empty and allows a retry when a request fails', async () => {
     fetchSpy = mockApi(500)
-    const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { folders, tags, correspondents, ensureLoaded } = useMetadataOptions()
     await ensureLoaded()

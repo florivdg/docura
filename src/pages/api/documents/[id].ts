@@ -1,4 +1,11 @@
+import { ApiValidationError } from '@/lib/api-validation-error'
 import type { APIRoute } from 'astro'
+import {
+  validateDocumentPatch,
+  documentPatchUpdates,
+  type DocumentPatch,
+} from '@/lib/document-patch'
+import { jsonResponse } from '@/lib/json-response'
 import { db } from '@/db'
 import {
   correspondent,
@@ -11,7 +18,6 @@ import {
 import { eq, desc, inArray } from 'drizzle-orm'
 import { unlink } from 'node:fs/promises'
 import {
-  isValidIsoDate,
   isValidUUID,
   safePath,
   parseJsonBody,
@@ -80,38 +86,32 @@ async function loadDocumentRelations(doc: DocumentRow) {
 async function documentResponse(doc: DocumentRow): Promise<Response> {
   const relations = await loadDocumentRelations(doc)
 
-  return new Response(
-    JSON.stringify({
-      document: {
-        id: doc.id,
-        name: doc.name,
-        mimeType: doc.mimeType,
-        fileSize: doc.fileSize,
-        isFavorite: doc.isFavorite,
-        archivedAt: doc.archivedAt,
-        trashedAt: doc.trashedAt,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt,
-        documentDate: doc.documentDate,
-        textContent: doc.textContent,
-        folder: relations.folder,
-        correspondent: relations.correspondent,
-        tags: relations.tags,
-        processingJobs: relations.processingJobs,
-      },
-    }),
-    { headers: { 'Content-Type': 'application/json' } },
-  )
+  return jsonResponse({
+    document: {
+      id: doc.id,
+      name: doc.name,
+      mimeType: doc.mimeType,
+      fileSize: doc.fileSize,
+      isFavorite: doc.isFavorite,
+      archivedAt: doc.archivedAt,
+      trashedAt: doc.trashedAt,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+      documentDate: doc.documentDate,
+      textContent: doc.textContent,
+      folder: relations.folder,
+      correspondent: relations.correspondent,
+      tags: relations.tags,
+      processingJobs: relations.processingJobs,
+    },
+  })
 }
 
 export const GET: APIRoute = async ({ params }) => {
   const { id } = params
 
   if (!id || !isValidUUID(id)) {
-    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
   }
 
   const [doc] = await db
@@ -121,10 +121,7 @@ export const GET: APIRoute = async ({ params }) => {
     .limit(1)
 
   if (!doc) {
-    return new Response(JSON.stringify({ error: 'Dokument nicht gefunden' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
   }
 
   return documentResponse(doc)
@@ -135,10 +132,7 @@ export const DELETE: APIRoute = async ({ params, url }) => {
   const permanent = url.searchParams.get('permanent') === 'true'
 
   if (!id || !isValidUUID(id)) {
-    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
   }
 
   const [doc] = await db
@@ -152,19 +146,16 @@ export const DELETE: APIRoute = async ({ params, url }) => {
     .limit(1)
 
   if (!doc) {
-    return new Response(JSON.stringify({ error: 'Dokument nicht gefunden' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
   }
 
   if (permanent) {
     if (!doc.trashedAt) {
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           error: 'Endgültiges Löschen nur für Dokumente im Papierkorb erlaubt',
-        }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } },
+        },
+        400,
       )
     }
 
@@ -178,18 +169,16 @@ export const DELETE: APIRoute = async ({ params, url }) => {
 
     await db.delete(document).where(eq(document.id, id))
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ success: true })
   }
 
   // Guard: don't re-trash already-trashed documents
   if (doc.trashedAt) {
-    return new Response(
-      JSON.stringify({
+    return jsonResponse(
+      {
         error: 'Dokument befindet sich bereits im Papierkorb',
-      }),
-      { status: 409, headers: { 'Content-Type': 'application/json' } },
+      },
+      409,
     )
   }
 
@@ -199,19 +188,14 @@ export const DELETE: APIRoute = async ({ params, url }) => {
     .set({ trashedAt: new Date() })
     .where(eq(document.id, id))
 
-  return new Response(JSON.stringify({ success: true }), {
-    headers: { 'Content-Type': 'application/json' },
-  })
+  return jsonResponse({ success: true })
 }
 
 export const PATCH: APIRoute = async ({ params, request }) => {
   const { id } = params
 
   if (!id || !isValidUUID(id)) {
-    return new Response(JSON.stringify({ error: 'Ungültige Dokument-ID' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
   }
 
   const [doc] = await db
@@ -221,158 +205,25 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     .limit(1)
 
   if (!doc) {
-    return new Response(JSON.stringify({ error: 'Dokument nicht gefunden' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
   }
 
-  let body: {
-    folderId?: string | null
-    correspondentId?: string | null
-    documentDate?: string | null
-    tagIds?: string[]
-    name?: string
-    isFavorite?: boolean
-    trashedAt?: string | null
-    archivedAt?: string | null
-  }
+  let body: DocumentPatch
   try {
-    body = await parseJsonBody<typeof body>(request)
+    body = await validateDocumentPatch(
+      await parseJsonBody<unknown>(request),
+      referenceExists,
+      countExistingTags,
+    )
   } catch (err) {
-    if (err instanceof JsonParseError) {
-      return new Response(JSON.stringify({ error: err.message }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
+    if (err instanceof JsonParseError)
+      return jsonResponse({ error: err.message }, 400)
+    if (err instanceof ApiValidationError)
+      return jsonResponse({ error: err.message }, err.status)
     throw err
   }
-  const { folderId, tagIds } = body
-
-  if ('folderId' in body) {
-    if (folderId !== null && folderId !== undefined) {
-      if (!isValidUUID(folderId)) {
-        return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      const [f] = await db
-        .select({ id: folder.id })
-        .from(folder)
-        .where(eq(folder.id, folderId))
-        .limit(1)
-
-      if (!f) {
-        return new Response(
-          JSON.stringify({ error: 'Ordner nicht gefunden' }),
-          { status: 404, headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-    }
-  }
-
-  if ('correspondentId' in body) {
-    const { correspondentId } = body
-    if (correspondentId !== null && correspondentId !== undefined) {
-      if (!isValidUUID(correspondentId)) {
-        return new Response(
-          JSON.stringify({ error: 'Ungültige Korrespondenten-ID' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-
-      const [c] = await db
-        .select({ id: correspondent.id })
-        .from(correspondent)
-        .where(eq(correspondent.id, correspondentId))
-        .limit(1)
-
-      if (!c) {
-        return new Response(
-          JSON.stringify({ error: 'Korrespondent nicht gefunden' }),
-          { status: 404, headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-    }
-  }
-
-  if ('documentDate' in body) {
-    const { documentDate } = body
-    if (documentDate !== null && documentDate !== undefined) {
-      if (typeof documentDate !== 'string' || !isValidIsoDate(documentDate)) {
-        return new Response(
-          JSON.stringify({ error: 'Ungültiges Belegdatum' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-    }
-  }
-
-  if ('name' in body) {
-    if (
-      typeof body.name !== 'string' ||
-      body.name.trim().length < 1 ||
-      body.name.trim().length > 200
-    ) {
-      return new Response(
-        JSON.stringify({
-          error: 'Name muss ein nicht-leerer Text sein (maximal 200 Zeichen)',
-        }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } },
-      )
-    }
-  }
-
-  if ('tagIds' in body) {
-    if (!Array.isArray(tagIds)) {
-      return new Response(
-        JSON.stringify({ error: 'tagIds muss ein Array sein' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } },
-      )
-    }
-
-    if (tagIds.some((t) => !isValidUUID(t))) {
-      return new Response(JSON.stringify({ error: 'Ungültige Tag-ID' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-
-    if (tagIds.length > 0) {
-      const existingTags = await db
-        .select({ id: tag.id })
-        .from(tag)
-        .where(inArray(tag.id, tagIds))
-
-      if (existingTags.length !== tagIds.length) {
-        return new Response(
-          JSON.stringify({ error: 'Ein oder mehrere Tags nicht gefunden' }),
-          { status: 404, headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-    }
-  }
-
-  if ('isFavorite' in body && typeof body.isFavorite !== 'boolean') {
-    return new Response(
-      JSON.stringify({ error: 'isFavorite muss ein Boolean sein' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    )
-  }
-
-  const updates: Record<string, unknown> = {}
-  if ('name' in body) updates.name = body.name!.trim()
-  if ('folderId' in body) updates.folderId = folderId ?? null
-  if ('correspondentId' in body)
-    updates.correspondentId = body.correspondentId ?? null
-  if ('documentDate' in body) updates.documentDate = body.documentDate ?? null
-  if ('isFavorite' in body) updates.isFavorite = body.isFavorite!
-  if ('trashedAt' in body)
-    updates.trashedAt = body.trashedAt === null ? null : new Date()
-  if ('archivedAt' in body)
-    updates.archivedAt = body.archivedAt === null ? null : new Date()
+  const { tagIds } = body
+  const updates = documentPatchUpdates(body)
 
   await db.transaction(async (tx) => {
     if (Object.keys(updates).length > 0) {
@@ -398,4 +249,25 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     .limit(1)
 
   return documentResponse(updated)
+}
+
+async function referenceExists(
+  kind: 'folder' | 'correspondent',
+  id: string,
+): Promise<boolean> {
+  const table = kind === 'folder' ? folder : correspondent
+  const rows = await db
+    .select({ id: table.id })
+    .from(table)
+    .where(eq(table.id, id))
+    .limit(1)
+  return rows.length > 0
+}
+
+async function countExistingTags(ids: string[]): Promise<number> {
+  const rows = await db
+    .select({ id: tag.id })
+    .from(tag)
+    .where(inArray(tag.id, ids))
+  return rows.length
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, vi } from 'vitest'
 
 import { WORKER_CONFIG } from '@/worker/config'
 import {
@@ -59,3 +59,5 @@ describe('averageAndNormalizeVectors', () => {
     expect(averageAndNormalizeVectors([vectorOf(0)])).toEqual(vectorOf(0))
   })
 })
+
+vi.mock('@/db', () => ({ db: {} }))
