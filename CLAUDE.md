@@ -48,6 +48,7 @@ bun run astro check        # Astro project check
 bunx vue-tsc --noEmit      # Type-check Vue components
 bun run test               # Vitest unit and Vue interaction tests
 bun run test:coverage      # Measured Istanbul coverage for Fallow
+bun run e2e:smoke          # Smoke test a running instance, see README "Smoke test"
 bun run fallow             # fallow audit of changed files - verdict must not be `fail`
 bun run fallow:dead        # Whole-project passes: dead code,
 bun run fallow:dupes       #   duplication,
@@ -80,6 +81,7 @@ bun run fallow:health      #   complexity / maintainability
 - `src/lib/server/` - Server-only logic: storage config, permanent deletion, file streaming, export ZIP, storage consistency check, migrations
 - `src/worker/` - Background processing worker (see below)
 - `scripts/` - CLI scripts (worker entrypoint, user management, sha256 backfill, embedding maintenance, backup/restore and backup scheduler (bash), storage check, export, migrations, worker healthcheck)
+- `e2e/` - End-to-end smoke test: `smoke.ts` (entry, run with Bun) and `browser.ts` drive a real instance without mocks and are excluded from coverage; `config.ts`, `fixtures.ts`, `helpers.ts` are pure and unit-tested. Must not import from `src/`
 - `docker/` - `Caddyfile` (production HTTPS proxy) and `init-extensions.sql` (dev compose only; in production `scripts/migrate.ts` creates the extensions)
 - `uploads/` - Document file storage (not in git)
 - `watch/` - Watch folder for filesystem ingest (not in git)

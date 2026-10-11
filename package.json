@@ -1,7 +1,7 @@
 {
   "name": "docura",
   "type": "module",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "scripts": {
     "dev": "bun --bun astro dev --ignore-lock",
     "build": "astro build",
@@ -29,7 +29,8 @@
     "fallow:dead": "fallow dead-code",
     "fallow:dupes": "fallow dupes",
     "fallow:health": "fallow health",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "e2e:smoke": "bun run e2e/smoke.ts"
   },
   "dependencies": {
     "@astrojs/node": "11.1.6",
@@ -66,6 +67,7 @@
     "happy-dom": "^20.14.5",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
+    "playwright": "1.64.0",
     "postgres": "^3.4.9",
     "prettier": "3.9.9",
     "prettier-plugin-astro": "1.1.0",
