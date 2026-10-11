@@ -23,6 +23,8 @@ test('loads documents with restored filters and switches sort through three stat
   expect(fetch.mock.calls[0][0]).toContain('folderIds=f1')
   expect(state.documents.value).toEqual([{ id: 'a' }])
   state.toggleSort('name')
+  // The export follows the filters, not sorting or paging.
+  expect(state.exportUrl.value).toBe('/api/documents/export?folderIds=f1')
   expect(state.sortOrder.value).toBe('asc')
   state.toggleSort('name')
   expect(state.sortOrder.value).toBe('desc')

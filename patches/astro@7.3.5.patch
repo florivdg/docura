@@ -1,0 +1,38 @@
+diff --git a/dist/core/app/node.js b/dist/core/app/node.js
+index 7c6caa6c28eb0eecff2aa02d55f9ef2f95b036f5..d2deddd7ab46ca9bbdd06d698a104849e37d4972 100644
+--- a/dist/core/app/node.js
++++ b/dist/core/app/node.js
+@@ -166,11 +166,32 @@ async function writeResponse(source, destination) {
+         );
+       });
+     });
++    if (destination.destroyed) {
++      reader.cancel().catch(() => {});
++      return destination.end();
++    }
+     let result = await reader.read();
+     while (!result.done) {
+-      destination.write(result.value);
++      if (destination.destroyed) break;
++      if (!destination.write(result.value)) {
++        if (!destination.destroyed) {
++          await new Promise((resolve) => {
++            const done = () => {
++              destination.off("drain", done);
++              destination.off("close", done);
++              destination.off("error", done);
++              resolve();
++            };
++            destination.on("drain", done);
++            destination.on("close", done);
++            destination.on("error", done);
++          });
++        }
++        if (destination.destroyed) break;
++      }
+       result = await reader.read();
+     }
++    if (destination.destroyed) reader.cancel().catch(() => {});
+     destination.end();
+   } catch (err) {
+     destination.write("Internal server error", () => {

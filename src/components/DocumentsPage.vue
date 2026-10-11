@@ -5,6 +5,7 @@ import PageLayout from '@/components/PageLayout.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import StatusMessage from '@/components/StatusMessage.vue'
 import DocumentsBulkBar from '@/components/documents/DocumentsBulkBar.vue'
+import DocumentsExportButton from '@/components/documents/DocumentsExportButton.vue'
 import DocumentsFilterBar from '@/components/documents/DocumentsFilterBar.vue'
 import DocumentsPagination from '@/components/documents/DocumentsPagination.vue'
 import DocumentsTable from '@/components/documents/DocumentsTable.vue'
@@ -15,6 +16,11 @@ import { useDocumentsFilter } from '@/composables/useDocumentsFilter'
 import { useProcessingEvents } from '@/composables/useProcessingEvents'
 import { apiFetch } from '@/lib/api-fetch'
 import { applyListProcessingEvent } from '@/lib/document-processing-event'
+
+const { exportMaxDocuments } = defineProps<{
+  /** EXPORT_MAX_DOCUMENTS of the server; the export button is disabled above it. */
+  exportMaxDocuments?: number
+}>()
 
 const {
   view,
@@ -38,6 +44,7 @@ const {
   toggleSort,
   goToPage,
   requestInputs,
+  exportUrl,
 } = useDocumentsFilter()
 
 const VIEW_TITLES: Record<string, string> = {
@@ -47,6 +54,9 @@ const VIEW_TITLES: Record<string, string> = {
 }
 const pageTitle = computed(() => VIEW_TITLES[view.value] ?? 'Dokumente')
 const hasResults = computed(() => !loading.value && documents.value.length > 0)
+const semanticSearch = computed(
+  () => searchMode.value === 'semantic' && query.value.trim() !== '',
+)
 
 const permanentDeleteOpen = ref(false)
 const pendingDeleteId = ref<string | null>(null)
@@ -171,6 +181,13 @@ onUnmounted(() => {
       @clear="clearFilters"
     />
 
+    <DocumentsExportButton
+      :href="exportUrl"
+      :total-count="totalCount"
+      :semantic-search="semanticSearch"
+      :max-documents="exportMaxDocuments"
+    />
+
     <TrashInfoBar
       v-if="view === 'trash' && hasResults"
       :retention-days="trashRetentionDays"
@@ -181,6 +198,7 @@ onUnmounted(() => {
     <DocumentsBulkBar
       v-if="selectedIds.length > 0"
       :count="selectedIds.length"
+      :selected-ids="selectedIds"
       :trash-view="view === 'trash'"
       :pending="bulkPending"
       @action="runBulkAction"

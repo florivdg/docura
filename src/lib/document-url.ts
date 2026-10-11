@@ -42,7 +42,7 @@ export function parseDocumentUrl(search: string) {
 
 type DocumentUrlState = ReturnType<typeof parseDocumentUrl>
 
-function commonParams(state: DocumentUrlState, api: boolean): URLSearchParams {
+function commonParams(state: ExportFilterState, api: boolean): URLSearchParams {
   const params = new URLSearchParams()
   if (state.view !== 'all') params.set('view', state.view)
   const lists = [
@@ -53,12 +53,18 @@ function commonParams(state: DocumentUrlState, api: boolean): URLSearchParams {
   ] as const
   for (const [key, values] of lists)
     if (values.length) params.set(key, values.join(','))
+  return params
+}
+
+/** The list filters plus the sort column, shared by page URL and API request. */
+function listParams(state: DocumentUrlState, api: boolean): URLSearchParams {
+  const params = commonParams(state, api)
   if (state.sortColumn) params.set('sort', state.sortColumn)
   return params
 }
 
 export function documentUrlParams(state: DocumentUrlState): URLSearchParams {
-  const params = commonParams(state, false)
+  const params = listParams(state, false)
   if (state.query.trim()) params.set('q', state.query.trim())
   if (state.searchMode !== 'fulltext') params.set('mode', state.searchMode)
   if (state.sortColumn && state.sortOrder !== 'desc')
@@ -69,7 +75,7 @@ export function documentUrlParams(state: DocumentUrlState): URLSearchParams {
 }
 
 export function documentApiParams(state: DocumentUrlState): URLSearchParams {
-  const params = commonParams(state, true)
+  const params = listParams(state, true)
   if (state.sortColumn) params.set('order', state.sortOrder)
   params.set('page', String(state.page))
   params.set('size', String(state.pageSize))
@@ -88,4 +94,36 @@ export function documentRequest(state: DocumentUrlState): {
     return { url: `/api/documents/search?${params}`, resultKey: 'results' }
   }
   return { url: `/api/documents?${params}`, resultKey: 'documents' }
+}
+
+/** The list filters an export follows; sorting and paging do not matter. */
+export type ExportFilterState = Pick<
+  DocumentUrlState,
+  | 'view'
+  | 'query'
+  | 'searchMode'
+  | 'folderIds'
+  | 'tagIds'
+  | 'correspondentIds'
+  | 'statuses'
+>
+
+const EXPORT_URL = '/api/documents/export'
+
+/**
+ * Download URL of the ZIP export, either for explicitly selected `ids` or
+ * for everything the list currently shows.
+ */
+export function documentExportUrl(
+  selection: { ids: string[] } | ExportFilterState,
+): string {
+  if ('ids' in selection)
+    return `${EXPORT_URL}?${new URLSearchParams({ ids: selection.ids.join(',') })}`
+  const params = commonParams(selection, true)
+  const query = selection.query.trim()
+  if (query) params.set('q', query)
+  if (query && selection.searchMode !== 'fulltext')
+    params.set('mode', selection.searchMode)
+  const search = params.toString()
+  return search ? `${EXPORT_URL}?${search}` : EXPORT_URL
 }

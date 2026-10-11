@@ -1,7 +1,7 @@
 import { fulltextExpressions } from '@/db/fulltext-expressions'
 import type { APIRoute } from 'astro'
 import type { SQL } from 'drizzle-orm'
-import { and, isNotNull, or, sql } from 'drizzle-orm'
+import { and, isNotNull, sql } from 'drizzle-orm'
 
 import { document } from '@/db/schema/documents'
 import { generateEmbedding } from '@/worker/clients/ollama'
@@ -10,12 +10,13 @@ import {
   filterValidationError,
   viewValidationError,
   readDocumentPagination,
+  MIN_QUERY_LENGTH,
   type DocumentFilters,
   type DocumentPagination,
 } from '@/lib/document-filters'
 import { jsonResponse } from '@/lib/json-response'
 import {
-  buildFilterConditions,
+  documentListCondition,
   loadTagsForDocuments,
   countDocuments,
   documentRowsQuery,
@@ -67,7 +68,7 @@ async function handleFulltextSearch(
   pagination: DocumentPagination,
   filterParams: DocumentFilters,
 ) {
-  if (query.length < 2) {
+  if (query.length < MIN_QUERY_LENGTH) {
     return jsonResponse({
       results: [],
       total: 0,
@@ -76,17 +77,11 @@ async function handleFulltextSearch(
     })
   }
 
-  const { searchConditions, relevanceScore, headlineSql } =
-    fulltextExpressions(query)
-  const filterConditions = buildFilterConditions(filterParams)
-  const whereClause =
-    filterConditions.length > 0
-      ? and(or(...searchConditions), ...filterConditions)
-      : or(...searchConditions)
-
+  const { relevanceScore, headlineSql } = fulltextExpressions(query)
   return executeSearch(
     { headline: headlineSql, relevance: relevanceScore },
-    whereClause,
+    documentListCondition(filterParams, query),
+    filterParams,
     pagination,
     sql`relevance DESC`,
   )
@@ -112,12 +107,10 @@ async function handleSemanticSearch(
 
   const vectorLiteral = `[${queryVector.join(',')}]`
 
-  const filterConditions: SQL[] = [
+  const whereClause = and(
     isNotNull(document.embedding),
-    ...buildFilterConditions(filterParams),
-  ]
-
-  const whereClause = and(...filterConditions)
+    documentListCondition(filterParams),
+  )
 
   return executeSearch(
     {
@@ -127,6 +120,7 @@ async function handleSemanticSearch(
         ),
     },
     whereClause,
+    filterParams,
     pagination,
     sql`${document.embedding} <=> ${vectorLiteral}::vector`,
   )
@@ -135,10 +129,11 @@ async function handleSemanticSearch(
 async function executeSearch(
   fields: Record<string, SQL.Aliased>,
   whereClause: SQL | undefined,
+  filters: DocumentFilters,
   pagination: DocumentPagination,
   fallback: SQL,
 ) {
-  const total = await countDocuments(whereClause)
+  const total = await countDocuments(whereClause, filters)
   const rows = await documentRowsQuery(fields)
     .where(whereClause)
     .orderBy(documentSort(pagination, fallback))

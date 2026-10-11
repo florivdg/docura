@@ -3,6 +3,7 @@ import {
   parseDocumentUrl,
   documentUrlParams,
   documentApiParams,
+  documentExportUrl,
 } from './document-url'
 
 test('restores all document filter values from a URL', () => {
@@ -47,4 +48,26 @@ test('URL serialization round-trips filters and uses different API key names', (
   expect(api.get('correspondentIds')).toBe('c1')
   expect(api.get('order')).toBe('asc')
   expect(documentUrlParams(parseDocumentUrl('')).toString()).toBe('')
+})
+
+test('export URLs carry either the selected ids or the list filters', () => {
+  expect(documentExportUrl({ ids: ['a', 'b'] })).toBe(
+    '/api/documents/export?ids=a%2Cb',
+  )
+  expect(documentExportUrl(parseDocumentUrl(''))).toBe('/api/documents/export')
+  const state = parseDocumentUrl(
+    '?view=trash&q=%20Steuer%20&folders=f1&tags=t1&status=failed&sort=name&page=3',
+  )
+  const params = new URL(documentExportUrl(state), 'http://x').searchParams
+  expect(Object.fromEntries(params)).toEqual({
+    view: 'trash',
+    folderIds: 'f1',
+    tagIds: 't1',
+    status: 'failed',
+    q: 'Steuer',
+  })
+  const semantic = parseDocumentUrl('?q=Steuer&mode=semantic')
+  expect(documentExportUrl(semantic)).toBe(
+    '/api/documents/export?q=Steuer&mode=semantic',
+  )
 })

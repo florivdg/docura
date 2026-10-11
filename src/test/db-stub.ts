@@ -17,6 +17,7 @@ export function createDbStub() {
       groupBy: () => chain,
       innerJoin: () => chain,
       leftJoin: () => chain,
+      $dynamic: () => chain,
       for: (strength: string) => {
         kind = `${kind} for ${strength}`
         return chain

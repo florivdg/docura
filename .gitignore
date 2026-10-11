@@ -28,6 +28,7 @@ __pycache__/
 
 # uploaded documents
 uploads/
+backups/
 
 # fallow analysis cache
 .fallow/
