@@ -1,25 +1,22 @@
 import { WORKER_CONFIG } from '@/worker/config'
-import { claimNextJob } from '@/worker/pipeline/job-lifecycle'
+import {
+  clearWorkerHeartbeat,
+  publishWorkerHeartbeat,
+  workerIdentity,
+} from '@/worker/heartbeat'
+import { abortableSleep, runPeriodically } from '@/worker/periodic'
+import { claimNextJob, recoverStaleJobs } from '@/worker/pipeline/job-lifecycle'
 import { processJob } from '@/worker/process-job'
 import { cleanupTrash } from '@/worker/trash-cleanup'
 import { assertDatabaseCompatibility } from '@/worker/utils/db-checks'
 import { startWatcher, stopWatcher } from '@/worker/watch'
 
-let shuttingDown = false
-
-async function interruptibleSleep(ms: number) {
-  const step = 1000
-  let remaining = ms
-  while (remaining > 0 && !shuttingDown) {
-    await Bun.sleep(Math.min(step, remaining))
-    remaining -= step
-  }
-}
+const shutdown = new AbortController()
 
 function registerShutdownHandlers() {
   const handler = () => {
-    if (shuttingDown) return
-    shuttingDown = true
+    if (shutdown.signal.aborted) return
+    shutdown.abort()
     console.log('Shutdown-Signal empfangen, Worker wird beendet...')
     void stopWatcher()
   }
@@ -28,7 +25,7 @@ function registerShutdownHandlers() {
 }
 
 async function workerLoop(workerId: number) {
-  while (!shuttingDown) {
+  while (!shutdown.signal.aborted) {
     try {
       const job = await claimNextJob()
       if (job) {
@@ -41,27 +38,26 @@ async function workerLoop(workerId: number) {
     } catch (error) {
       console.error(`[Worker ${workerId}] Fehler:`, error)
     }
-    await Bun.sleep(WORKER_CONFIG.pollIntervalMs)
+    await abortableSleep(WORKER_CONFIG.pollIntervalMs, shutdown.signal)
   }
   console.log(`[Worker ${workerId}] beendet`)
 }
 
-async function trashCleanupLoop() {
-  while (!shuttingDown) {
-    try {
-      const deleted = await cleanupTrash()
-      if (deleted > 0)
-        console.log(`Papierkorb: ${deleted} abgelaufene Dokumente gelöscht`)
-    } catch (error) {
-      console.error('Fehler bei Papierkorb-Bereinigung:', error)
-    }
-    await interruptibleSleep(WORKER_CONFIG.trashCleanupIntervalMs)
-  }
+async function removeExpiredTrash() {
+  const deleted = await cleanupTrash()
+  if (deleted > 0)
+    console.log(`Papierkorb: ${deleted} abgelaufene Dokumente gelöscht`)
 }
 
-export async function startWorker(
-  concurrency = WORKER_CONFIG.workerConcurrency,
-) {
+async function resetStaleJobs() {
+  const recovered = await recoverStaleJobs()
+  if (recovered.length > 0)
+    console.warn(
+      `${recovered.length} abgebrochene Verarbeitung(en) zurückgesetzt`,
+    )
+}
+
+function logConfiguration(concurrency: number) {
   console.log('Worker gestartet, warte auf Aufträge...')
   console.log(`  UPLOAD_DIR: ${WORKER_CONFIG.uploadDir}`)
   console.log(`  OLLAMA_URL: ${WORKER_CONFIG.ollamaUrl}`)
@@ -73,18 +69,58 @@ export async function startWorker(
   console.log(`  WATCH_DIR: ${WORKER_CONFIG.watchDir}`)
   console.log(`  WATCH_ENABLED: ${WORKER_CONFIG.watchEnabled}`)
   console.log(`  TRASH_RETENTION_DAYS: ${WORKER_CONFIG.trashRetentionDays}`)
+  console.log(
+    `  STALE_JOB_TIMEOUT_MINUTES: ${WORKER_CONFIG.staleJobTimeoutMs / 60_000}`,
+  )
+}
+
+export async function startWorker(
+  concurrency = WORKER_CONFIG.workerConcurrency,
+) {
+  logConfiguration(concurrency)
 
   await assertDatabaseCompatibility()
   console.log(
     `  DB-Check: OK (public.document.embedding = vector(${WORKER_CONFIG.embeddingDimensions}))`,
   )
-
   registerShutdownHandlers()
 
   await startWatcher()
 
+  const identity = workerIdentity(concurrency)
+  const { signal } = shutdown
+  // The heartbeat has its own signal: it keeps running until the job loops
+  // have drained, so /system does not show a worker finishing jobs as down.
+  const heartbeat = new AbortController()
+  const heartbeatLoop = runPeriodically(
+    'Worker-Heartbeat',
+    WORKER_CONFIG.heartbeatIntervalMs,
+    () => publishWorkerHeartbeat(identity),
+    heartbeat.signal,
+  )
   const workers = Array.from({ length: concurrency }, (_, i) =>
     workerLoop(i + 1),
   )
-  await Promise.all([...workers, trashCleanupLoop()])
+  try {
+    await Promise.all([
+      ...workers,
+      runPeriodically(
+        'Papierkorb-Bereinigung',
+        WORKER_CONFIG.trashCleanupIntervalMs,
+        removeExpiredTrash,
+        signal,
+      ),
+      // Runs right away too: jobs left in `processing` by a crashed worker.
+      runPeriodically(
+        'Prüfung abgebrochener Aufträge',
+        WORKER_CONFIG.staleJobSweepIntervalMs,
+        resetStaleJobs,
+        signal,
+      ),
+    ])
+  } finally {
+    heartbeat.abort()
+    await heartbeatLoop
+  }
+  await clearWorkerHeartbeat()
 }

@@ -4,6 +4,7 @@ import { db } from '@/db'
 import { WORKER_CONFIG } from '@/worker/config'
 
 const EXPECTED_EMBEDDING_COLUMN_TYPE = `vector(${WORKER_CONFIG.embeddingDimensions})`
+const RUNBOOK_HINT = 'Siehe README, Abschnitt "Changing the embedding model".'
 
 export async function assertDatabaseCompatibility() {
   const extensionRows = await db.execute<{ extensionName: string }>(sql`
@@ -34,14 +35,14 @@ export async function assertDatabaseCompatibility() {
 
   if (columnRows.length === 0) {
     throw new Error(
-      'Spalte "public.document.embedding" fehlt. Bitte Schema mit "bun run db:push" synchronisieren.',
+      `Spalte "public.document.embedding" fehlt. Bitte Migrationen mit "bun run db:migrate" anwenden. ${RUNBOOK_HINT}`,
     )
   }
 
   const actualType = columnRows[0].columnType
   if (actualType !== EXPECTED_EMBEDDING_COLUMN_TYPE) {
     throw new Error(
-      `Ungültiger Spaltentyp für "public.document.embedding": ${actualType}. Erwartet: ${EXPECTED_EMBEDDING_COLUMN_TYPE}. Bitte "bun run db:push" ausführen.`,
+      `Ungültiger Spaltentyp für "public.document.embedding": ${actualType}. Erwartet: ${EXPECTED_EMBEDDING_COLUMN_TYPE} (EMBEDDING_DIMENSIONS). ${RUNBOOK_HINT}`,
     )
   }
 }

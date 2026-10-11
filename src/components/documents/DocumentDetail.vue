@@ -14,9 +14,15 @@ const props = defineProps<{
   documentId: string
 }>()
 
-const { doc, loading, notFound, error, patchDocument } = useDocumentResource(
-  props.documentId,
-)
+const {
+  doc,
+  loading,
+  notFound,
+  error,
+  patchDocument,
+  hasActiveProcessing,
+  refetchDocument,
+} = useDocumentResource(props.documentId)
 const {
   deleting,
   restoring,
@@ -29,7 +35,9 @@ const {
   handlePermanentDelete,
   handleArchive,
   handleUnarchive,
-} = useDocumentActions(props.documentId, doc, patchDocument)
+  reprocessing,
+  handleReprocess,
+} = useDocumentActions(props.documentId, doc, patchDocument, refetchDocument)
 </script>
 
 <template>
@@ -90,10 +98,13 @@ const {
       :back-url="backUrl"
       :archiving="archiving"
       :deleting="deleting"
+      :processing="hasActiveProcessing"
+      :reprocessing="reprocessing"
       :patch-document="patchDocument"
       @favorite="toggleFavorite"
       @archive="handleArchive"
       @delete="handleDelete"
+      @reprocess="handleReprocess"
     />
 
     <DocumentStateBanner

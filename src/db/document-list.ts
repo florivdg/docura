@@ -9,7 +9,7 @@ import {
   tag,
   processingJob,
 } from '@/db/schema/documents'
-import { latestJobPerDoc, viewConditions } from '@/db/queries'
+import { isLatestJob, latestJobPerDoc, viewConditions } from '@/db/queries'
 import type { DocumentFilters } from '@/lib/document-filters'
 
 export function buildFilterConditions(filterParams: DocumentFilters): SQL[] {
@@ -101,10 +101,7 @@ export function documentRowsQuery(extra: Record<string, SQL.Aliased>) {
     .leftJoin(folder, eq(document.folderId, folder.id))
     .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
     .leftJoin(latestJob, eq(document.id, latestJob.documentId))
-    .leftJoin(
-      processingJob,
-      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
-    )
+    .leftJoin(processingJob, isLatestJob(latestJob))
 }
 
 export async function countDocuments(
@@ -115,10 +112,7 @@ export async function countDocuments(
     .select({ count: sql<number>`count(*)` })
     .from(document)
     .leftJoin(latestJob, eq(document.id, latestJob.documentId))
-    .leftJoin(
-      processingJob,
-      sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
-    )
+    .leftJoin(processingJob, isLatestJob(latestJob))
     .where(whereClause)
   return Number(rows[0]?.count ?? 0)
 }

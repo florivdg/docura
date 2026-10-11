@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { createDbStub } from '@/test/db-stub'
-import { detailFixture } from '@/test/document-fixture'
+import { detailFixture, reprocessCandidate } from '@/test/document-fixture'
 import { routeCaller } from '@/test/route-call'
 const stub = createDbStub()
 vi.doMock('@/db', () => ({ db: stub.db }))
@@ -9,6 +9,7 @@ const list = await import('./index')
 const search = await import('./search')
 const bulk = await import('./bulk')
 const trash = await import('./trash')
+const reprocess = await import('./[id]/reprocess')
 const id = detailFixture().id
 const call = routeCaller(stub, id)
 test('returns 400 and 404 without modifying a document', async () => {
@@ -109,4 +110,83 @@ test('emptying the trash validates the action and deletes trashed rows', async (
   stub.results.push([{ id, storagePath: 'missing-trash-test.pdf' }], [])
   const response = await call(trash.POST, { body: { action: 'empty' } })
   expect(await response.json()).toEqual({ success: true, deleted: 1 })
+})
+
+/** Query results of the lock and the retry cancellation before the read. */
+const LOCK_AND_CANCEL = [[], []]
+
+test('reprocess queues a full job or reuses the pending one', async () => {
+  stub.results.push(
+    ...LOCK_AND_CANCEL,
+    [reprocessCandidate(id)],
+    [{ jobId: 'job', id }],
+  )
+  const created = await call(reprocess.POST)
+  expect(created.status).toBe(201)
+  expect(await created.json()).toEqual({
+    job: { id: 'job', status: 'pending', kind: 'full' },
+  })
+  expect(stub.writes[1]).toEqual([{ documentId: id, kind: 'full' }])
+  stub.results.push(...LOCK_AND_CANCEL, [
+    reprocessCandidate(id, { pendingJobId: 'old' }),
+  ])
+  const reused = await call(reprocess.POST)
+  expect(reused.status).toBe(200)
+  expect((await reused.json()).job.id).toBe('old')
+})
+
+test('reprocess reports the real kind of an upgraded pending job', async () => {
+  stub.results.push(
+    ...LOCK_AND_CANCEL,
+    [
+      reprocessCandidate(id, {
+        pendingJobId: 'old',
+        pendingJobKind: 'embedding',
+      }),
+    ],
+    [{ jobId: 'old', id }],
+  )
+  const upgraded = await call(reprocess.POST)
+  expect(upgraded.status).toBe(200)
+  expect(await upgraded.json()).toEqual({
+    job: { id: 'old', status: 'pending', kind: 'full' },
+  })
+})
+
+test('reprocess rejects invalid, unknown, trashed and running documents', async () => {
+  expect((await call(reprocess.POST, { id: 'bad' })).status).toBe(400)
+  expect((await call(reprocess.POST)).status).toBe(404)
+  stub.results.push(...LOCK_AND_CANCEL, [
+    reprocessCandidate(id, { trashed: true }),
+  ])
+  const trashed = await call(reprocess.POST)
+  expect(trashed.status).toBe(409)
+  expect((await trashed.json()).error).toBe(
+    'Dokument im Papierkorb kann nicht neu verarbeitet werden',
+  )
+  stub.results.push(...LOCK_AND_CANCEL, [
+    reprocessCandidate(id, { processing: true }),
+  ])
+  const running = await call(reprocess.POST)
+  expect(await running.json()).toEqual({ error: 'Verarbeitung läuft bereits' })
+  expect(stub.queries).not.toContain('insert')
+})
+
+test('bulk reprocess reports queued and skipped documents', async () => {
+  const other = '22222222-2222-4222-8222-222222222222'
+  stub.results.push(
+    [{ id }, { id: other }],
+    ...LOCK_AND_CANCEL,
+    [reprocessCandidate(id), reprocessCandidate(other, { trashed: true })],
+    [{ jobId: 'job', id }],
+  )
+  const response = await call(bulk.POST, {
+    body: { ids: [id, other], action: 'reprocess' },
+  })
+  expect(await response.json()).toEqual({
+    success: true,
+    count: 2,
+    queued: [id],
+    skipped: [{ id: other, reason: 'trashed' }],
+  })
 })

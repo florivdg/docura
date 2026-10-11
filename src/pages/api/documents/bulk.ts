@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro'
-import { db } from '@/db'
+import { db, type Transaction } from '@/db'
+import { enqueueReprocessing } from '@/db/processing-jobs'
 import { document, documentTag, folder, tag } from '@/db/schema/documents'
 import { and, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { parseJsonBody } from '@/lib/api-utils'
@@ -12,7 +13,6 @@ import {
 } from '@/lib/document-bulk'
 import { jsonResponse } from '@/lib/json-response'
 
-type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 async function validateReferences(request: BulkDocumentRequest): Promise<void> {
   if (request.action === 'move' && request.folderId) {
     const rows = await db
@@ -62,12 +62,24 @@ async function applyBulkAction(
     .where(and(...conditions))
 }
 
+/** Trashed and running documents are skipped and reported, not rejected. */
+async function reprocess(ids: string[]): Promise<Response> {
+  const { queued, skipped } = await enqueueReprocessing(ids, 'full')
+  return jsonResponse({
+    success: true,
+    count: ids.length,
+    queued: queued.map((job) => job.id),
+    skipped,
+  })
+}
+
 export const POST: APIRoute = ({ request }) =>
   withApiErrors(async () => {
     const body = validateBulkDocumentRequest(
       await parseJsonBody<unknown>(request),
     )
     await validateReferences(body)
+    if (body.action === 'reprocess') return reprocess(body.ids)
     await db.transaction((tx) => applyBulkAction(tx, body))
     return jsonResponse({ success: true, count: body.ids.length })
   })

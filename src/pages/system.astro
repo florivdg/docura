@@ -1,0 +1,8 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro'
+import SystemStatusPage from '@/components/SystemStatusPage.vue'
+---
+
+<AppLayout title="System - Docura">
+  <SystemStatusPage client:only="vue" />
+</AppLayout>

@@ -1,13 +1,12 @@
 import { extractImageText } from '@/worker/clients/ocr'
-import { updateStep } from '@/worker/pipeline/job-lifecycle'
+import { type JobLease, updateStep } from '@/worker/pipeline/job-lifecycle'
 
 export async function extractImageOcr(
   doc: { name: string; mimeType: string },
   fileBuffer: Buffer,
-  jobId: string,
-  documentId: string,
+  lease: JobLease,
 ): Promise<string> {
-  await updateStep(jobId, documentId, 'ocr')
+  await updateStep(lease, 'ocr')
 
-  return extractImageText(fileBuffer, doc.name, doc.mimeType)
+  return extractImageText(fileBuffer, doc.name, doc.mimeType, lease.signal)
 }

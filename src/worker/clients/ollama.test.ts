@@ -89,4 +89,18 @@ describe('chatWithOllama', () => {
 
     expect(await chatError()).toThrow('LLM-Anfrage fehlgeschlagen: 500')
   })
+
+  test('a lost job lease cancels the request', async () => {
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (_url, init) => {
+        init?.signal?.throwIfAborted()
+        return chatReply('{}')
+      })
+    const lease = new AbortController()
+    lease.abort(new Error('Lease verloren'))
+    await expect(
+      chatWithOllama('system', 'user', lease.signal),
+    ).rejects.toThrow('Lease verloren')
+  })
 })

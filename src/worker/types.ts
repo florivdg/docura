@@ -1,3 +1,5 @@
+import type { JobKind } from '@/lib/processing'
+
 export interface LlmAnalysisResult {
   title: string | null
   tags: string[]
@@ -7,10 +9,7 @@ export interface LlmAnalysisResult {
 }
 
 export type ProcessingStep =
-  | 'text_extraction'
-  | 'ocr'
-  | 'llm_analysis'
-  | 'embedding'
+  'text_extraction' | 'ocr' | 'llm_analysis' | 'embedding'
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
@@ -18,12 +17,14 @@ export interface ProcessingJobRecord {
   id: string
   document_id: string
   status: JobStatus
+  kind: JobKind
   step: ProcessingStep | null
   error_message: string | null
   attempts: number
   max_attempts: number
   next_retry_at: string | null
   started_at: string | null
+  heartbeat_at: string | null
   completed_at: string | null
   created_at: string
   updated_at: string
@@ -37,5 +38,6 @@ export interface ProcessingNotification {
   documentId: string
   step: ProcessingStep | null
   status: JobStatus
+  kind: JobKind
   errorMessage?: string
 }

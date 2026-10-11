@@ -7,6 +7,7 @@ async function requestOcr(
   fileName: string,
   mimeType: string,
   mode?: PdfMode,
+  signal?: AbortSignal,
 ): Promise<string> {
   const formData = new FormData()
   formData.append(
@@ -18,7 +19,7 @@ async function requestOcr(
   const endpoint = mode ? 'pdf' : 'image'
   const response = await fetchWithTimeout(
     `${WORKER_CONFIG.ocrServiceUrl}/extract/${endpoint}`,
-    { method: 'POST', body: formData },
+    { method: 'POST', body: formData, signal },
     WORKER_CONFIG.ocrTimeoutMs,
   )
   if (!response.ok) {
@@ -35,20 +36,23 @@ export function extractPdfText(
   fileBuffer: Uint8Array,
   fileName: string,
   mimeType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
-  return requestOcr(fileBuffer, fileName, mimeType, 'text')
+  return requestOcr(fileBuffer, fileName, mimeType, 'text', signal)
 }
 export function extractPdfOcr(
   fileBuffer: Uint8Array,
   fileName: string,
   mimeType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
-  return requestOcr(fileBuffer, fileName, mimeType, 'ocr')
+  return requestOcr(fileBuffer, fileName, mimeType, 'ocr', signal)
 }
 export function extractImageText(
   fileBuffer: Uint8Array,
   fileName: string,
   mimeType: string,
+  signal?: AbortSignal,
 ): Promise<string> {
-  return requestOcr(fileBuffer, fileName, mimeType)
+  return requestOcr(fileBuffer, fileName, mimeType, undefined, signal)
 }

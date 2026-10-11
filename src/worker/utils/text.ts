@@ -13,6 +13,14 @@ export function chunkText(
   return chunks
 }
 
+const CODE_FENCE = /^```(?:json)?\s*([\s\S]*?)\s*```$/i
+
+/** Parses an LLM JSON answer; some models wrap it in a Markdown code fence. */
+export function parseLlmJson(text: string): unknown {
+  const trimmed = text.trim()
+  return JSON.parse(CODE_FENCE.exec(trimmed)?.[1] ?? trimmed)
+}
+
 export function sanitizeTitle(value: unknown): string | null {
   if (typeof value !== 'string') return null
   let title = value.trim()

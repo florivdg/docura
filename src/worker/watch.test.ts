@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -63,6 +64,8 @@ test('imports existing documents, handles filesystem events and shuts down clean
   await stopWatcher()
   await writeFile(join(state.config.watchDir, 'test.pdf'), '%PDFdata')
   await startWatcher()
+  // Without the mock a real fs.watch races the test (flaky double imports).
+  expect(state.event).not.toBeNull()
   expect(state.persist).toHaveBeenCalledTimes(2)
   expect(await readdir(state.config.watchDir)).toEqual([])
   state.event?.('change', null)

@@ -64,11 +64,26 @@ export function useDocumentResource(documentId: string) {
     }
   }
 
+  /** A job is queued or running; disables a new reprocess request. */
   const hasActiveProcessing = computed(
     () =>
       doc.value?.processingJobs.some(
         (j) => j.status === 'pending' || j.status === 'processing',
       ) ?? false,
+  )
+
+  /**
+   * Also listens while a failed attempt has a retry ahead (e.g. after a
+   * stale-job reset): the retry reuses the job id, so its events update the
+   * row and the toolbar.
+   */
+  const watchProcessing = computed(
+    () =>
+      hasActiveProcessing.value ||
+      (doc.value?.processingJobs.some(
+        (j) => j.status === 'failed' && j.attempts < j.maxAttempts,
+      ) ??
+        false),
   )
 
   useProcessingEvents(
@@ -77,8 +92,16 @@ export function useDocumentResource(documentId: string) {
 
       if (applyDocumentProcessingEvent(doc.value, event)) void refetchDocument()
     },
-    { enabled: hasActiveProcessing },
+    { enabled: watchProcessing },
   )
 
-  return { doc, loading, notFound, error, patchDocument }
+  return {
+    doc,
+    loading,
+    notFound,
+    error,
+    patchDocument,
+    hasActiveProcessing,
+    refetchDocument,
+  }
 }

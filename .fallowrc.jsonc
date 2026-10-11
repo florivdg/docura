@@ -60,6 +60,8 @@
           "src/middleware.ts",
           "src/lib/auth.ts",
           "src/lib/email.ts",
+          "src/lib/redis.ts",
+          "src/lib/server/**",
           "scripts/**",
         ],
       },

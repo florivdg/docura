@@ -4,12 +4,14 @@ import { fetchWithTimeout } from '@/worker/utils/fetch-with-timeout'
 export async function chatWithOllama(
   system: string,
   user: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const request = (structured: boolean) =>
     fetchWithTimeout(
       `${WORKER_CONFIG.ollamaUrl}/api/chat`,
       {
         method: 'POST',
+        signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: WORKER_CONFIG.ollamaLlmModel,
@@ -44,11 +46,15 @@ export async function chatWithOllama(
   return raw.message.content
 }
 
-export async function generateEmbedding(input: string): Promise<number[][]> {
+export async function generateEmbedding(
+  input: string,
+  signal?: AbortSignal,
+): Promise<number[][]> {
   const response = await fetchWithTimeout(
     `${WORKER_CONFIG.ollamaUrl}/api/embed`,
     {
       method: 'POST',
+      signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: WORKER_CONFIG.ollamaEmbedModel,

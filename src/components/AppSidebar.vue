@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  Activity,
   Archive,
   Contact,
   FileText,
@@ -116,6 +117,11 @@ const usersNavItem = {
 const navSecondary = computed(() => [
   // User management is admin-only; the page itself enforces this server-side.
   ...(isAdmin(session.value.data?.user) ? [usersNavItem] : []),
+  {
+    title: 'System',
+    url: '/system',
+    icon: Activity,
+  },
   {
     title: 'Einstellungen',
     url: '/account',
