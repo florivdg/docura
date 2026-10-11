@@ -1,6 +1,7 @@
 import { ApiValidationError } from './api-validation-error'
 import { requireJsonObject, uuid, uuidList } from './request-validation'
-const MAX_IDS = 100
+/** Upper bound of ids per bulk action and per selection export. */
+export const MAX_IDS = 100
 const ACTIONS = [
   'move',
   'addTags',

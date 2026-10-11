@@ -2,6 +2,10 @@ import { expect, test, vi } from 'vitest'
 import { createDbStub } from '@/test/db-stub'
 import { detailFixture, reprocessCandidate } from '@/test/document-fixture'
 import { routeCaller } from '@/test/route-call'
+import { tempDir } from '@/test/temp-dir'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { STORAGE_CONFIG } from '@/lib/server/storage-config'
 const stub = createDbStub()
 vi.doMock('@/db', () => ({ db: stub.db }))
 const detail = await import('./[id]')
@@ -10,6 +14,8 @@ const search = await import('./search')
 const bulk = await import('./bulk')
 const trash = await import('./trash')
 const reprocess = await import('./[id]/reprocess')
+const file = await import('./[id]/file')
+const exporter = await import('./export')
 const id = detailFixture().id
 const call = routeCaller(stub, id)
 test('returns 400 and 404 without modifying a document', async () => {
@@ -107,9 +113,114 @@ test('emptying the trash validates the action and deletes trashed rows', async (
   expect((await call(trash.GET)).status).toBe(200)
   expect((await call(trash.POST, { body: '{' })).status).toBe(400)
   expect((await call(trash.POST, { body: { action: 'x' } })).status).toBe(400)
-  stub.results.push([{ id, storagePath: 'missing-trash-test.pdf' }], [])
+  stub.results.push([{ storagePath: 'missing-trash-test.pdf' }])
   const response = await call(trash.POST, { body: { action: 'empty' } })
   expect(await response.json()).toEqual({ success: true, deleted: 1 })
+  expect(stub.queries).toEqual(['delete'])
+})
+
+test('permanent DELETE removes a trashed document row before its file', async () => {
+  stub.results.push(
+    [{ id, trashedAt: new Date() }],
+    [{ storagePath: 'missing-permanent-test.pdf' }],
+  )
+  const response = await call(detail.DELETE, { path: '/?permanent=true' })
+  expect(await response.json()).toEqual({ success: true })
+  expect(stub.queries).toEqual(['select', 'delete'])
+})
+
+test('file GET validates the id, the row and the storage path', async () => {
+  expect((await call(file.GET, { id: 'bad' })).status).toBe(400)
+  expect((await call(file.GET)).status).toBe(404)
+  stub.results.push([{ name: 'a.pdf', storagePath: '../escape.pdf' }])
+  expect((await call(file.GET)).status).toBe(400)
+  stub.results.push([
+    { name: 'a.pdf', mimeType: 'application/pdf', storagePath: 'missing.pdf' },
+  ])
+  const missing = await call(file.GET)
+  expect(missing.status).toBe(404)
+  expect(await missing.json()).toEqual({ error: 'Datei nicht gefunden' })
+})
+
+test('file GET names the download with the extension of its type', async () => {
+  const config = STORAGE_CONFIG as { uploadDir: string }
+  const uploadDir = config.uploadDir
+  config.uploadDir = tempDir('file-route')
+  try {
+    writeFileSync(join(config.uploadDir, 'stored.pdf'), '%PDF-1.4')
+    stub.results.push([
+      {
+        name: 'Hausrat: Beitrag 2026',
+        mimeType: 'application/pdf',
+        storagePath: 'stored.pdf',
+        sha256: null,
+      },
+    ])
+    const response = await call(file.GET, { path: '/?download=true' })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-disposition')).toContain(
+      'filename="Hausrat_ Beitrag 2026.pdf"',
+    )
+  } finally {
+    config.uploadDir = uploadDir
+  }
+})
+
+test('export rejects invalid ids, filters and semantic queries', async () => {
+  const error = async (path: string) => {
+    const response = await call(exporter.GET, { path })
+    expect(response.status).toBe(400)
+    return (await response.json()).error
+  }
+  expect(await error('/?ids=bad')).toBe('Ungültige Dokument-ID')
+  expect(await error('/?ids=')).toBe('Keine Dokumente ausgewählt')
+  expect(await error('/?view=bad')).toBe('Ungültiger View-Parameter')
+  expect(await error('/?q=Steuer&mode=semantic')).toBe(
+    'Semantische Suche kann nicht exportiert werden',
+  )
+  expect(await error('/?q=a')).toBe(
+    'Suchbegriff muss mindestens 2 Zeichen lang sein',
+  )
+  expect(stub.queries).toEqual([])
+})
+
+test('export refuses selections above the document limit', async () => {
+  stub.results.push(Array.from({ length: 10_001 }, () => ({ id })))
+  const response = await call(exporter.GET, { path: '/?q=Steuer&tagIds=' + id })
+  expect(response.status).toBe(413)
+  expect(await response.json()).toEqual({
+    error: 'Export zu groß – bitte Auswahl einschränken',
+  })
+})
+
+test('export streams a ZIP for explicit ids, ignoring the list filters', async () => {
+  const row = {
+    id,
+    name: 'Rechnung.pdf',
+    mimeType: 'application/pdf',
+    fileSize: 1,
+    storagePath: 'missing-export-test.pdf',
+    sha256: null,
+    folderId: null,
+    correspondent: null,
+    documentDate: null,
+    isFavorite: false,
+    archivedAt: null,
+    trashedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+  stub.results.push([{ id }], [], [row], [], [])
+  const response = await call(exporter.GET, {
+    path: `/?ids=${id},${id}&view=bad`,
+  })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toBe('application/zip')
+  expect(response.headers.get('content-disposition')).toMatch(
+    /^attachment; filename="docura-export-\d{8}-\d{4}\.zip"/,
+  )
+  const zip = new Uint8Array(await response.arrayBuffer())
+  expect(Array.from(zip.subarray(0, 2))).toEqual([0x50, 0x4b])
 })
 
 /** Query results of the lock and the retry cancellation before the read. */

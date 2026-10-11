@@ -1,5 +1,6 @@
 import type { DocumentPagination } from '@/lib/document-filters'
-import { inArray, eq, sql, asc, desc, type SQL } from 'drizzle-orm'
+import { and, inArray, eq, or, sql, asc, desc, type SQL } from 'drizzle-orm'
+import type { PgSelect } from 'drizzle-orm/pg-core'
 import { db } from '@/db'
 import {
   document,
@@ -9,10 +10,11 @@ import {
   tag,
   processingJob,
 } from '@/db/schema/documents'
+import { fulltextExpressions } from '@/db/fulltext-expressions'
 import { isLatestJob, latestJobPerDoc, viewConditions } from '@/db/queries'
 import type { DocumentFilters } from '@/lib/document-filters'
 
-export function buildFilterConditions(filterParams: DocumentFilters): SQL[] {
+function buildFilterConditions(filterParams: DocumentFilters): SQL[] {
   const conditions: SQL[] = [...viewConditions(filterParams.view)]
 
   if (filterParams.folderIds.length > 0) {
@@ -43,6 +45,33 @@ export function buildFilterConditions(filterParams: DocumentFilters): SQL[] {
   }
 
   return conditions
+}
+
+/**
+ * What the document list shows: the view, the filters and an optional
+ * full-text query. The status filter needs `withLatestJob`.
+ */
+export function documentListCondition(
+  filters: DocumentFilters,
+  query = '',
+): SQL | undefined {
+  const conditions = buildFilterConditions(filters)
+  if (query)
+    conditions.push(or(...fulltextExpressions(query).searchConditions)!)
+  return and(...conditions)
+}
+
+/** Only the status filter reads the latest job; skip the join otherwise. */
+export function filtersByStatus(filters: DocumentFilters): boolean {
+  return filters.statuses.length > 0
+}
+
+/** Left-joins each document's latest processing job (status column and filter). */
+export function withLatestJob<T extends PgSelect>(query: T) {
+  const latestJob = latestJobPerDoc()
+  return query
+    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
+    .leftJoin(processingJob, isLatestJob(latestJob))
 }
 
 export async function loadTagsForDocuments(
@@ -94,26 +123,27 @@ const documentListFields = {
 }
 
 export function documentRowsQuery(extra: Record<string, SQL.Aliased>) {
-  const latestJob = latestJobPerDoc()
-  return db
-    .select({ ...extra, ...documentListFields })
-    .from(document)
-    .leftJoin(folder, eq(document.folderId, folder.id))
-    .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
-    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
-    .leftJoin(processingJob, isLatestJob(latestJob))
+  return withLatestJob(
+    db
+      .select({ ...extra, ...documentListFields })
+      .from(document)
+      .leftJoin(folder, eq(document.folderId, folder.id))
+      .leftJoin(correspondent, eq(document.correspondentId, correspondent.id))
+      .$dynamic(),
+  )
 }
 
 export async function countDocuments(
   whereClause: SQL | undefined,
+  filters: DocumentFilters,
 ): Promise<number> {
-  const latestJob = latestJobPerDoc()
-  const rows = await db
+  const query = db
     .select({ count: sql<number>`count(*)` })
     .from(document)
-    .leftJoin(latestJob, eq(document.id, latestJob.documentId))
-    .leftJoin(processingJob, isLatestJob(latestJob))
-    .where(whereClause)
+    .$dynamic()
+  const rows = await (
+    filtersByStatus(filters) ? withLatestJob(query) : query
+  ).where(whereClause)
   return Number(rows[0]?.count ?? 0)
 }
 

@@ -1,8 +1,12 @@
 ---
 import AppLayout from '@/layouts/AppLayout.astro'
 import DocumentsPage from '@/components/DocumentsPage.vue'
+import { STORAGE_CONFIG } from '@/lib/server/storage-config'
 ---
 
 <AppLayout title="Dokumente - Docura">
-  <DocumentsPage client:only="vue" />
+  <DocumentsPage
+    client:only="vue"
+    exportMaxDocuments={STORAGE_CONFIG.exportMaxDocuments}
+  />
 </AppLayout>

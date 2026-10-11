@@ -1,6 +1,9 @@
 import { isValidUUID, VALID_STATUSES } from './api-utils'
 import type { SortColumn, SortOrder } from './document-url'
 
+/** Shorter full-text queries are not searched (and cannot be exported). */
+export const MIN_QUERY_LENGTH = 2
+
 export interface DocumentFilters {
   folderIds: string[]
   tagIds: string[]

@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { document } from '@/db/schema/documents'
-import { and, desc } from 'drizzle-orm'
+import { desc } from 'drizzle-orm'
 import {
   readDocumentFilters,
   filterValidationError,
@@ -9,7 +9,7 @@ import {
 } from '@/lib/document-filters'
 import { jsonResponse } from '@/lib/json-response'
 import {
-  buildFilterConditions,
+  documentListCondition,
   loadTagsForDocuments,
   countDocuments,
   documentRowsQuery,
@@ -28,8 +28,7 @@ export const GET: APIRoute = async ({ url }) => {
     offset,
     page: pageParam,
   } = readDocumentPagination(url.searchParams, 'createdAt')
-  const conditions = buildFilterConditions(filters)
-  const whereClause = and(...conditions)
+  const whereClause = documentListCondition(filters)
   const pagination = {
     sortColumn,
     sortOrder,
@@ -37,7 +36,7 @@ export const GET: APIRoute = async ({ url }) => {
     offset,
     page: pageParam,
   }
-  const total = await countDocuments(whereClause)
+  const total = await countDocuments(whereClause, filters)
   const rows = await documentRowsQuery({})
     .where(whereClause)
     .orderBy(documentSort(pagination, desc(document.createdAt)))

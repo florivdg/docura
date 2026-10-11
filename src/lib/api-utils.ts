@@ -1,3 +1,5 @@
+import type { Stats } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const UUID_V4_RE =
@@ -14,6 +16,28 @@ export function safePath(uploadDir: string, storagePath: string): string {
     throw new Error('Ungültiger Dateipfad')
   }
   return resolvedPath
+}
+
+/** Like `safePath`, but `null` instead of an error for a path outside `uploadDir`. */
+export function safePathOrNull(
+  uploadDir: string,
+  storagePath: string,
+): string | null {
+  try {
+    return safePath(uploadDir, storagePath)
+  } catch {
+    return null
+  }
+}
+
+/** The file's stats, or `null` when it does not exist; other errors throw. */
+export async function statFile(path: string): Promise<Stats | null> {
+  try {
+    return await stat(path)
+  } catch (err) {
+    if (isEnoent(err)) return null
+    throw err
+  }
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/

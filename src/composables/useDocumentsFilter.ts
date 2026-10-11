@@ -7,6 +7,7 @@ import {
   parseDocumentUrl,
   documentUrlParams,
   documentRequest,
+  documentExportUrl,
   type ViewType,
   type SortColumn,
   type SortOrder,
@@ -90,6 +91,9 @@ export function useDocumentsFilter() {
       pageSize: pageSize.value,
     }
   }
+
+  /** ZIP download of everything the list shows (sorting and paging aside). */
+  const exportUrl = computed(() => documentExportUrl(filterState()))
 
   async function fetchDocuments() {
     fetchController?.abort()
@@ -260,5 +264,6 @@ export function useDocumentsFilter() {
     toggleSort,
     goToPage,
     requestInputs,
+    exportUrl,
   }
 }

@@ -15,6 +15,10 @@
     "db:studio": "drizzle-kit studio",
     "worker": "bun run scripts/worker.ts",
     "backfill:sha256": "bun run scripts/backfill-sha256.ts",
+    "backup": "bash scripts/backup.sh",
+    "restore": "bash scripts/restore.sh",
+    "storage:check": "bun run scripts/storage-check.ts",
+    "export": "bun run scripts/export.ts",
     "embeddings:clear": "bun run scripts/embeddings-clear.ts",
     "embeddings:reembed": "bun run scripts/embeddings-reembed.ts",
     "user:add": "bun run scripts/add-user.ts",
@@ -36,6 +40,7 @@
     "@unovis/ts": "1.7.1",
     "@unovis/vue": "1.7.1",
     "@vueuse/core": "15.0.0",
+    "@zip.js/zip.js": "2.23.0",
     "astro": "7.3.5",
     "better-auth": "1.7.7",
     "class-variance-authority": "^0.7.1",
@@ -70,5 +75,8 @@
     "vite": "8.3.3",
     "vitest": "^5.0.3",
     "vue-tsc": "3.3.12"
+  },
+  "patchedDependencies": {
+    "astro@7.3.5": "patches/astro@7.3.5.patch"
   }
 }

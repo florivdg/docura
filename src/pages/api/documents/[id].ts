@@ -16,8 +16,9 @@ import {
   folder,
 } from '@/db/schema/documents'
 import { eq, desc, inArray } from 'drizzle-orm'
-import { unlink } from 'node:fs/promises'
-import { isValidUUID, safePath, parseJsonBody } from '@/lib/api-utils'
+import { isValidUUID, parseJsonBody } from '@/lib/api-utils'
+import { removeDocumentsPermanently } from '@/lib/server/document-removal'
+import { STORAGE_CONFIG } from '@/lib/server/storage-config'
 
 async function loadCorrespondent(
   correspondentId: string | null,
@@ -135,7 +136,6 @@ export const DELETE: APIRoute = async ({ params, url }) => {
   const [doc] = await db
     .select({
       id: document.id,
-      storagePath: document.storagePath,
       trashedAt: document.trashedAt,
     })
     .from(document)
@@ -156,16 +156,11 @@ export const DELETE: APIRoute = async ({ params, url }) => {
       )
     }
 
-    const uploadDir = process.env.UPLOAD_DIR || './uploads'
-    try {
-      const filePath = safePath(uploadDir, doc.storagePath)
-      await unlink(filePath)
-    } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err
-    }
-
-    await db.delete(document).where(eq(document.id, id))
-
+    await removeDocumentsPermanently(
+      db,
+      eq(document.id, id),
+      STORAGE_CONFIG.uploadDir,
+    )
     return jsonResponse({ success: true })
   }
 

@@ -6,103 +6,83 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { document, folder, processingJob } from '@/db/schema/documents'
 import { isValidUUID } from '@/lib/api-utils'
+import { withApiErrors } from '@/lib/api-errors'
+import { ApiValidationError } from '@/lib/api-validation-error'
 import { isUniqueViolation } from '@/lib/db-errors'
 import { computeSha256 } from '@/lib/hash'
 import { ALLOWED_MIME_TYPES, validateMagicBytes } from '@/lib/file-validation'
+import { jsonResponse } from '@/lib/json-response'
 import { findDocumentBySha256, type DuplicateDocument } from '@/db/queries'
+import { STORAGE_CONFIG } from '@/lib/server/storage-config'
+
+interface UploadRequest {
+  file: File
+  folderId: string | null
+  /** File extension for the stored name, from the declared MIME type. */
+  ext: string
+}
+
+interface StoredUpload {
+  file: File
+  folderId: string | null
+  /** Stored file name inside UPLOAD_DIR. */
+  filename: string
+  buffer: Buffer
+  sha256: string
+}
 
 function duplicateResponse(existing?: DuplicateDocument): Response {
-  return new Response(
-    JSON.stringify({
+  return jsonResponse(
+    {
       error: 'Ein identisches Dokument ist bereits vorhanden',
       duplicate: existing ?? null,
-    }),
-    { status: 409, headers: { 'Content-Type': 'application/json' } },
+    },
+    409,
   )
 }
 
-export const POST: APIRoute = async ({ request }) => {
-  const uploadDir = process.env.UPLOAD_DIR || './uploads'
-  const maxFileSizeMB = Number(process.env.MAX_FILE_SIZE_MB || '50')
-
-  let formData: FormData
+async function readFormData(request: Request): Promise<FormData> {
   try {
-    formData = await request.formData()
+    return await request.formData()
   } catch {
-    return new Response(JSON.stringify({ error: 'Ungültige Formulardaten' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    throw new ApiValidationError('Ungültige Formulardaten')
   }
+}
 
+/** The uploaded file and target folder; invalid input throws a 400. */
+async function readUploadRequest(request: Request): Promise<UploadRequest> {
+  const maxFileSizeMB = Number(process.env.MAX_FILE_SIZE_MB || '50')
+  const formData = await readFormData(request)
   const file = formData.get('file')
   const folderId = formData.get('folderId') as string | null
 
-  if (!file || !(file instanceof File)) {
-    return new Response(JSON.stringify({ error: 'Keine Datei hochgeladen' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
-
+  if (!file || !(file instanceof File))
+    throw new ApiValidationError('Keine Datei hochgeladen')
   const ext = ALLOWED_MIME_TYPES[file.type]
-  if (!ext) {
-    return new Response(
-      JSON.stringify({ error: 'Dateityp nicht unterstützt' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    )
-  }
+  if (!ext) throw new ApiValidationError('Dateityp nicht unterstützt')
+  if (file.size > maxFileSizeMB * 1024 * 1024)
+    throw new ApiValidationError(`Datei zu groß (max. ${maxFileSizeMB} MB)`)
+  return { file, folderId, ext }
+}
 
-  if (file.size > maxFileSizeMB * 1024 * 1024) {
-    return new Response(
-      JSON.stringify({
-        error: `Datei zu groß (max. ${maxFileSizeMB} MB)`,
-      }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    )
-  }
+async function assertFolderExists(folderId: string | null): Promise<void> {
+  if (!folderId) return
+  if (!isValidUUID(folderId))
+    throw new ApiValidationError('Ungültige Ordner-ID')
+  const [existingFolder] = await db
+    .select({ id: folder.id })
+    .from(folder)
+    .where(eq(folder.id, folderId))
+  if (!existingFolder) throw new ApiValidationError('Ordner nicht gefunden')
+}
 
-  if (folderId) {
-    if (!isValidUUID(folderId)) {
-      return new Response(JSON.stringify({ error: 'Ungültige Ordner-ID' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    const [existingFolder] = await db
-      .select({ id: folder.id })
-      .from(folder)
-      .where(eq(folder.id, folderId))
-    if (!existingFolder) {
-      return new Response(JSON.stringify({ error: 'Ordner nicht gefunden' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-  }
-
-  const filename = `${randomUUID()}.${ext}`
+/** Writes the file, then the document row and its processing job. */
+async function storeUpload(
+  upload: StoredUpload,
+  uploadDir: string,
+): Promise<Response> {
+  const { file, folderId, filename, buffer, sha256 } = upload
   const storagePath = join(uploadDir, filename)
-
-  await mkdir(uploadDir, { recursive: true })
-  const buffer = Buffer.from(await file.arrayBuffer())
-
-  if (!validateMagicBytes(buffer, file.type)) {
-    return new Response(
-      JSON.stringify({
-        error: 'Dateiinhalt stimmt nicht mit dem deklarierten Typ überein',
-      }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    )
-  }
-
-  const sha256 = computeSha256(buffer)
-
-  const duplicate = await findDocumentBySha256(sha256)
-  if (duplicate) {
-    return duplicateResponse(duplicate)
-  }
-
   try {
     await writeFile(storagePath, buffer)
 
@@ -127,10 +107,7 @@ export const POST: APIRoute = async ({ request }) => {
       return { document: doc, processingJobId: job.id }
     })
 
-    return new Response(JSON.stringify(result), {
-      status: 201,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return jsonResponse(result, 201)
   } catch (error) {
     await unlink(storagePath).catch(() => {})
 
@@ -142,3 +119,24 @@ export const POST: APIRoute = async ({ request }) => {
     throw error
   }
 }
+
+export const POST: APIRoute = ({ request }) =>
+  withApiErrors(async () => {
+    const uploadDir = STORAGE_CONFIG.uploadDir
+    const { file, folderId, ext } = await readUploadRequest(request)
+    await assertFolderExists(folderId)
+
+    await mkdir(uploadDir, { recursive: true })
+    const buffer = Buffer.from(await file.arrayBuffer())
+    if (!validateMagicBytes(buffer, file.type))
+      throw new ApiValidationError(
+        'Dateiinhalt stimmt nicht mit dem deklarierten Typ überein',
+      )
+
+    const sha256 = computeSha256(buffer)
+    const duplicate = await findDocumentBySha256(sha256)
+    if (duplicate) return duplicateResponse(duplicate)
+
+    const filename = `${randomUUID()}.${ext}`
+    return storeUpload({ file, folderId, filename, buffer, sha256 }, uploadDir)
+  })

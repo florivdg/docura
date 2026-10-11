@@ -29,6 +29,10 @@ bun run embeddings:reembed [--all]           # Queue embedding-only jobs for doc
 bun run user:add <email> <password> [name] [--admin]  # Create a user (--admin for the first admin)
 bun run user:role <email> <admin|user>                # Change a user's role
 bun run user:password <email> <new-password>          # Reset a password without SMTP (revokes sessions)
+bun run backup                                # DB dump + uploads + manifest into BACKUP_DIR (PG_DUMP_CONTAINER=docura-db in dev)
+DATABASE_URL=… UPLOAD_DIR=… bun run restore <backup-dir> --yes [--force]  # Ignores .env; refuses non-empty targets without --force
+bun run storage:check [--json] [--verify-hashes] [--delete-orphans]  # DB rows vs. files, exit 1 on findings
+bun run export [--out f.zip] [--include-archived] [--include-trash]  # Library as ZIP with metadata.json/.csv
 
 # Code Quality
 bun run lint --type-aware  # Run OxLint
@@ -46,7 +50,7 @@ bun run fallow:health      #   complexity / maintainability
 
 ### Tech Stack
 
-- **Astro 7** - SSR framework with Node adapter (standalone mode), Rolldown-based Vite build
+- **Astro 7** - SSR framework with Node adapter (standalone mode), Rolldown-based Vite build. `patches/astro@<version>.patch` (`patchedDependencies`) makes the adapter's `writeResponse` wait for `drain` so streamed exports and files respect backpressure; re-create it with `bun patch astro` on every Astro upgrade (`src/lib/server/astro-backpressure.test.ts` fails without it). Docker build contexts must include `patches/`; the dev server is unpatched.
 - **Vue 3** - Interactive components with `<script setup>`
 - **TypeScript 6** - `types: ["bun"]` is required in tsconfig.json; TS 6 no longer auto-discovers `@types/*` globals
 - **Better Auth** - Authentication with passkey support
@@ -65,8 +69,9 @@ bun run fallow:health      #   complexity / maintainability
 - `src/composables/` - Vue composables (filters, metadata options, processing events, search)
 - `src/db/schema/` - Drizzle schema definitions (auth tables, documents, folders, tags, correspondents, jobs)
 - `src/lib/` - Auth configuration and shared utilities (hashing, dedup, validation, formatting)
+- `src/lib/server/` - Server-only logic: storage config, permanent deletion, file streaming, export ZIP, storage consistency check
 - `src/worker/` - Background processing worker (see below)
-- `scripts/` - CLI scripts (worker entrypoint, user management, sha256 backfill, embedding maintenance)
+- `scripts/` - CLI scripts (worker entrypoint, user management, sha256 backfill, embedding maintenance, backup/restore (bash), storage check, export)
 - `uploads/` - Document file storage (not in git)
 - `watch/` - Watch folder for filesystem ingest (not in git)
 - `drizzle/` - Never touch this folder - auto-generated Drizzle files
@@ -139,6 +144,11 @@ Soft deletion: `trashedAt` marks trash, `archivedAt` marks archive. Filter both 
 - `document.sha256` has a UNIQUE index and dedups both ingest paths: the upload API returns 409 with a
   reference to the existing document, the watch folder skips and logs. The column is nullable, so
   un-hashed legacy rows bypass dedup until `bun run backfill:sha256` has run.
+- `UPLOAD_DIR` and storage tunables live in `src/lib/server/storage-config.ts` (`STORAGE_CONFIG`).
+- Permanent deletion (`removeDocumentsPermanently`) removes the row before the file; an interrupted deletion
+  leaves an orphan file, which `storage:check --delete-orphans` reclaims.
+- `/api/documents/[id]/file` streams with `Range`/`ETag` support; `/api/documents/export` streams a ZIP
+  (`@zip.js/zip.js`, Zip64) of the selected ids or the current list filters.
 
 ## Environment Variables
 
@@ -159,9 +169,16 @@ Worker-related:
 - `OCR_SERVICE_URL` - OCR service for image documents
 - `REDIS_URL` - Pub/sub channel for processing progress
 - `WATCH_DIR` / `WATCH_ENABLED` - Filesystem ingest
-- `TRASH_RETENTION_DAYS` - Retention before permanent deletion (default 90)
+- `TRASH_RETENTION_DAYS` - Retention before permanent deletion (default 90; values <= 0 or invalid fall back to 90)
 - `WORKER_CONCURRENCY` - Parallel job workers (default 2)
 - `STALE_JOB_TIMEOUT_MINUTES` - Minutes without a job heartbeat before a running job counts as lost and is reset (default 10)
+
+Backup, storage and export:
+
+- `BACKUP_DIR` (default `./backups`) / `BACKUP_RETENTION_COUNT` (default 0 = keep all)
+- `PG_DUMP_CONTAINER` - Run pg_dump/pg_restore/psql via `docker exec` in this container (backup in dev: `docura-db`; restore takes it only from the command line)
+- `STORAGE_ORPHAN_MIN_AGE_MINUTES` - Orphan files younger than this are never deleted (default 60)
+- `EXPORT_MAX_DOCUMENTS` - Upper bound for a web export (default 10000, 413 above)
 
 ## Path Alias
 

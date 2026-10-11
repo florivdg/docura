@@ -1,17 +1,30 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { RefreshCw, RotateCcw, Star, StarOff, Trash2, X } from 'lucide-vue-next'
+import {
+  Download,
+  RefreshCw,
+  RotateCcw,
+  Star,
+  StarOff,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { BulkPayload } from '@/composables/useBulkDocumentActions'
+import { documentExportUrl } from '@/lib/document-url'
 import { documentCountLabel } from '@/lib/format'
 import BulkFolderPicker from './BulkFolderPicker.vue'
 import BulkTagPicker from './BulkTagPicker.vue'
 import ReprocessDialog from './ReprocessDialog.vue'
 
-/** Actions for the selected documents; the trash view only offers restoring. */
-const { count, trashView, pending } = defineProps<{
+/**
+ * Actions for the selected documents; the trash view only offers restoring
+ * and exporting.
+ */
+const { count, selectedIds, trashView, pending } = defineProps<{
   count: number
+  selectedIds: string[]
   trashView: boolean
   pending: boolean
 }>()
@@ -97,6 +110,17 @@ const reprocessOpen = ref(false)
         @confirm="emit('action', { action: 'trash' })"
       />
     </template>
+
+    <Button variant="outline" size="sm" as-child>
+      <a
+        :href="documentExportUrl({ ids: selectedIds })"
+        download
+        title="Ausgewählte Dokumente als ZIP exportieren"
+      >
+        <Download class="size-4" />
+        Exportieren
+      </a>
+    </Button>
 
     <Button
       variant="ghost"

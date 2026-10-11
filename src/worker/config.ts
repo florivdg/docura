@@ -1,4 +1,5 @@
 import { EMBEDDING_DIMENSIONS } from '@/db/schema/embedding'
+import { positiveNumber, STORAGE_CONFIG } from '@/lib/server/storage-config'
 
 const DEFAULT_STALE_JOB_TIMEOUT_MINUTES = 10
 /** Well above the 30 s job heartbeat, so a live job is never reset. */
@@ -9,15 +10,16 @@ const MIN_STALE_JOB_TIMEOUT_MINUTES = 2
  * or below the minimum (0 would reset every running job on each sweep).
  */
 export function staleTimeoutMinutes(raw: string | undefined): number {
-  const minutes = Number(raw)
-  return Number.isFinite(minutes) && minutes >= MIN_STALE_JOB_TIMEOUT_MINUTES
-    ? minutes
-    : DEFAULT_STALE_JOB_TIMEOUT_MINUTES
+  return positiveNumber(
+    raw,
+    DEFAULT_STALE_JOB_TIMEOUT_MINUTES,
+    MIN_STALE_JOB_TIMEOUT_MINUTES,
+  )
 }
 
 export const WORKER_CONFIG = {
   pollIntervalMs: 3000,
-  uploadDir: process.env.UPLOAD_DIR || './uploads',
+  uploadDir: STORAGE_CONFIG.uploadDir,
   ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
   ollamaEmbedModel: process.env.OLLAMA_EMBED_MODEL || 'mxbai-embed-large',
   ollamaLlmModel: process.env.OLLAMA_LLM_MODEL || 'llama3',
@@ -39,7 +41,7 @@ export const WORKER_CONFIG = {
   watchDebounceMs: 500,
   watchRescanIntervalMs: 60_000,
   maxFileSizeMB: Number(process.env.MAX_FILE_SIZE_MB || '50'),
-  trashRetentionDays: Number(process.env.TRASH_RETENTION_DAYS || '90'),
+  trashRetentionDays: STORAGE_CONFIG.trashRetentionDays,
   trashCleanupIntervalMs: 60 * 60 * 1000, // 1 hour
   // A job whose heartbeat is older than this is considered lost and reset.
   staleJobTimeoutMs:
