@@ -104,9 +104,16 @@ masked_database_url() {
   fi
 }
 
-# Bun and drizzle-kit keep variables that are already set, so the prefix
-# makes the follow-up commands use the restored target instead of ./.env.
+# Bun keeps variables that are already set, so the prefix makes the
+# follow-up commands use the restored target instead of ./.env.
+# RESTORE_NEXT_STEPS replaces them where these commands do not apply
+# (the compose `restore` service).
 print_next_steps() {
+  if [ -n "${RESTORE_NEXT_STEPS:-}" ]; then
+    echo "Wiederherstellung abgeschlossen. Nächste Schritte:"
+    printf '%s\n' "$RESTORE_NEXT_STEPS" | sed 's/^/  /'
+    return
+  fi
   local db upload
   db=$(printf 'DATABASE_URL=%q' "$(masked_database_url)")
   upload=$(printf 'UPLOAD_DIR=%q' "$UPLOAD_DIR")

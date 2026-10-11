@@ -75,6 +75,27 @@ test('cleans up a duplicate won by a concurrent importer', async () => {
   expect(await readdir(options.uploadDir)).toEqual([])
   expect(await readdir(options.watchDir)).toEqual([])
 })
+test('warns when the ingested source cannot be removed', async () => {
+  const source = join(options.watchDir, 'test.pdf')
+  // A directory in place of the file makes unlink fail, even as root.
+  options.persist = vi.fn(async () => {
+    await rm(source)
+    await mkdir(source)
+  })
+  await ingestWatchFile('test.pdf', options)
+  expect(options.persist).toHaveBeenCalledOnce()
+  expect(console.warn).toHaveBeenCalledWith(
+    `[Watch] Importierte Datei konnte nicht entfernt werden: ${source}`,
+    expect.anything(),
+  )
+})
+test('stays silent when the ingested source is already gone', async () => {
+  options.persist = vi.fn(async () => {
+    await rm(join(options.watchDir, 'test.pdf'))
+  })
+  await ingestWatchFile('test.pdf', options)
+  expect(console.warn).not.toHaveBeenCalled()
+})
 test('preserves the source when another watch event is pending', async () => {
   options.isPending = () => true
   await ingestWatchFile('test.pdf', options)

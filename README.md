@@ -14,7 +14,11 @@ A German-language shared document management system. All authenticated users sha
 ## Prerequisites
 
 - [Bun](https://bun.sh)
-- [PostgreSQL](https://www.postgresql.org)
+- [PostgreSQL](https://www.postgresql.org) with pgvector (development:
+  `docker compose -f docker-compose.dev.yml up -d` also starts Redis and OCR)
+
+For a production installation with Docker Compose and HTTPS see
+"Deployment".
 
 ## Getting Started
 
@@ -68,8 +72,9 @@ All commands are run from the project root:
 | `bun run build`              | Build for production                           |
 | `bun --bun run preview`      | Preview production build                       |
 | `bun run db:generate`        | Generate Drizzle migrations from schema        |
-| `bun run db:migrate`         | Run database migrations                        |
+| `bun run db:migrate`         | Create extensions, run database migrations     |
 | `bun run worker`             | Start the background processing worker         |
+| `bun run worker:health`      | Exit 0 if the worker heartbeat is current      |
 | `bun run embeddings:clear`   | Remove all document embeddings                 |
 | `bun run embeddings:reembed` | Queue embedding jobs (`--all`: every document) |
 | `bun run backup`             | Back up database and files (see "Backup")      |
@@ -82,6 +87,235 @@ All commands are run from the project root:
 | `bun run fallow:health`      | Report whole-project health                    |
 | `bun run lint --type-aware`  | Run OxLint                                     |
 | `bun run astro check`        | Run Astro project checks                       |
+
+## Deployment
+
+`docker-compose.yml` runs Docura on a LAN server with HTTPS: Caddy with its
+internal CA in front of the web app, PostgreSQL (pgvector), Redis, the OCR
+service, the worker, a one-shot migration service and daily backups. Only Caddy
+publishes ports (80 and 443). Development keeps using `docker-compose.dev.yml`
+and `bun --bun run dev`.
+
+| File                       | Purpose                                                        |
+| :------------------------- | :------------------------------------------------------------- |
+| `Dockerfile`               | One image for web app, worker and migrations (`oven/bun` slim) |
+| `docker-compose.yml`       | The production stack                                           |
+| `docker/Caddyfile`         | HTTPS (`tls internal`), HTTP→HTTPS redirect, CA download       |
+| `.env.production.example`  | Template for the server's `.env`                               |
+| `scripts/migrate.ts`       | Creates the extensions, applies pending migrations             |
+| `scripts/worker-health.ts` | Worker healthcheck (Redis heartbeat)                           |
+| `scripts/backup-loop.sh`   | Runs `backup.sh` daily at `BACKUP_TIME`                        |
+
+### Prerequisites
+
+- Docker Engine with Compose v2 (`docker compose`).
+- [Ollama](https://ollama.com) reachable from the containers, with the
+  configured models pulled (see "Ollama on the host").
+- A DNS or hosts entry for `DOCURA_HOST` (e.g. `docura.lan`) pointing to the
+  server's IP on every device that uses Docura. Passkeys are bound to this name;
+  changing it later invalidates them.
+
+### First start
+
+```sh
+cp .env.production.example .env
+openssl rand -base64 32                  # → BETTER_AUTH_SECRET
+openssl rand -base64 24 | tr -d '/+='    # → POSTGRES_PASSWORD
+# set DOCURA_HOST, BETTER_AUTH_SECRET and POSTGRES_PASSWORD in .env
+mkdir -p watch backups    # or DOCURA_WATCH_PATH / DOCURA_BACKUP_PATH if set
+sudo chown 1000:1000 watch   # Linux only; the worker runs as uid 1000
+docker compose up -d --build
+docker compose ps -a      # app, worker, db, redis, ocr, caddy healthy; backup running; migrate exited (0)
+```
+
+`POSTGRES_PASSWORD` may only contain letters and digits (A-Z, a-z, 0-9): it is
+inserted unencoded into `DATABASE_URL`, and compose interpolates `$`. The
+`migrate` service stops with a clear message otherwise. PostgreSQL reads the
+password only when the `db_data` volume is created, so changing it later in
+`.env` does not change the password of an existing database.
+
+Create the watch folder before the first start: Docker would otherwise create
+it owned by root, and the worker (uid 1000) could read but not remove ingested
+files, so every rescan would import them again (see "Watch folder"). The backup
+directory needs no `chown`, the `backup` service runs as root.
+
+Compose reads `.env` only to fill in `docker-compose.yml` (interpolation); it is
+not passed to the containers. They get explicit variables (database, Redis and
+OCR addresses, `UPLOAD_DIR=/data/uploads`, `WATCH_DIR=/data/watch`), so a
+development `.env` never leaks into them. `BETTER_AUTH_URL`, `PASSKEY_ORIGIN`
+and `PASSKEY_RP_ID` are derived from `DOCURA_HOST`. Optional settings left unset
+or empty fall back to the application defaults.
+
+The app container speaks plain HTTP and trusts the proxy's
+`X-Forwarded-Proto`/`X-Forwarded-Host` for `https` (`security.allowedDomains` in
+`astro.config.mjs`); without that, Astro's origin check would reject every
+upload. It must therefore only be reachable through Caddy: never publish port
+4321, or a client could forge those headers.
+
+Create the first administrator (the password needs at least 16 characters):
+
+```sh
+docker compose exec app bun run user:add <email> <password> <name> --admin
+```
+
+`GET /api/health` (public, no details) answers `{"status":"ok","database":"ok"}`
+or 503; the System page (`/system`) shows the full status.
+
+### Trusting the certificate
+
+Caddy issues the certificate from its own root CA ("Caddy Local Authority",
+valid for 10 years). Every device must trust that root once; passkeys only work
+over HTTPS with a trusted certificate. Where possible, copy it over a trusted
+channel (`docker compose cp`, then `scp` to the device):
+
+```sh
+docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./docura-root-ca.crt
+```
+
+Phones can instead download it from `http://<DOCURA_HOST>/docura-root-ca.crt`
+(plain HTTP, since they cannot open the HTTPS site before they trust it). Plain
+HTTP can be tampered with on the way, so **verify the fingerprint before
+trusting the certificate**, whichever way it arrived. Print the reference value
+on the server (`openssl` runs on the host; the Caddy image may not have it):
+
+```sh
+docker compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt | openssl x509 -noout -fingerprint -sha256
+```
+
+Compare it with the SHA-256 fingerprint the device shows and cancel on any
+mismatch:
+
+- macOS/Linux: `openssl x509 -noout -fingerprint -sha256 -in docura-root-ca.crt`
+- Windows: `certutil -dump docura-root-ca.crt` (line `Cert Hash(sha256)`)
+- iOS/iPadOS: Settings → General → VPN & Device Management → the profile → More
+  Details → SHA-256
+- Firefox: the "View" button in the import dialog, before ticking any trust
+  box
+- Android: shows no fingerprint before installing. Install it, then check it
+  under Settings → Security → Encryption & credentials → Trusted credentials →
+  User → the certificate, and remove it there immediately on a mismatch.
+  Copying the file over a trusted channel is preferable.
+
+Then install it:
+
+- **macOS**:
+  `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain docura-root-ca.crt`
+  (or Keychain Access → System → import → "Always Trust").
+- **iOS/iPadOS**: open the URL in Safari → Settings → "Profile Downloaded" →
+  Install; then Settings → General → About → Certificate Trust Settings → enable
+  full trust for the root.
+- **Windows** (administrator shell):
+  `certutil -addstore -f Root docura-root-ca.crt`.
+- **Android**: Settings → Security → Encryption & credentials → Install a
+  certificate → CA certificate (menu names vary by vendor).
+- **Linux**:
+  `sudo cp docura-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`.
+- **Firefox** uses its own store: Settings → Certificates → View Certificates →
+  Authorities → Import (or set `security.enterprise_roots.enabled` to use the
+  system store).
+
+The CA lives in the `caddy_data` volume, including its private key
+(`root.key`). Caddy's local root has no name constraints: anyone with that key
+can impersonate **any** HTTPS site to every device that trusts the root. Treat
+every copy of the volume as a secret (restricted permissions, encrypted
+storage, never in shared or unencrypted cloud folders). **Back it up** anyway
+(or never delete it): a new volume means a new CA, which every device has to
+trust again. The volume name carries the project prefix (`docura_caddy_data`
+for the default project name):
+
+```sh
+mkdir -m 700 -p ~/docura-secrets
+docker run --rm -v docura_caddy_data:/data:ro -v ~/docura-secrets:/out alpine \
+  sh -c 'umask 077 && tar czf /out/caddy_data.tgz -C /data .'
+```
+
+Move the archive off the server to encrypted storage right away; never keep it
+inside the repository directory and never commit it.
+
+The intermediate certificate renews itself weekly and needs no action. There is
+deliberately no HSTS, so a device without the CA can still proceed past the
+warning during setup.
+
+### Updating
+
+```sh
+git pull
+docker compose up -d --build
+docker compose logs migrate   # applied migrations, or "keine Migrationen ausstehend"
+```
+
+The `migrate` service runs on every `up` before app and worker start, so updates
+migrate the database automatically. A failed migration keeps app and worker
+stopped (`docker compose logs migrate`). Stopping the worker can take up to 3
+minutes while it finishes running jobs (`stop_grace_period`); jobs still
+unfinished then are reset after `STALE_JOB_TIMEOUT_MINUTES` and retried.
+`docker compose pull --ignore-buildable` refreshes the third-party images
+(Caddy, PostgreSQL, Redis).
+
+### Watch folder
+
+The worker reads `DOCURA_WATCH_PATH` (default `./watch`) mounted at
+`/data/watch`, e.g. as target of a scanner or an SMB share. App and worker run
+as uid 1000, so on Linux the directory must belong to it (see "First start"):
+`sudo chown -R 1000:1000 <path>`. If the worker cannot remove an imported file,
+it logs `Importierte Datei konnte nicht entfernt werden`
+(`docker compose logs worker`). Uploads live in the named volume `uploads`,
+which needs nothing.
+
+### Ollama on the host
+
+The default `OLLAMA_URL` is `http://host.docker.internal:11434`; app and worker
+map that name to the host (`host-gateway`, needed on Linux). Ollama must listen
+on all interfaces, not only on localhost: set `OLLAMA_HOST=0.0.0.0` for the
+Ollama service (Linux: `systemctl edit ollama` →
+`Environment="OLLAMA_HOST=0.0.0.0"`) and keep port 11434 closed to the outside.
+The System page shows whether the models are installed.
+
+### Backups in compose
+
+The `backup` service (PostgreSQL image, so `pg_dump` matches the server) runs
+`scripts/backup.sh` daily at `BACKUP_TIME` (HH:MM, UTC, default `03:00`) and
+keeps the newest `BACKUP_RETENTION_COUNT` (default 14) backups in
+`DOCURA_BACKUP_PATH` (default `./backups`). It runs as root and writes
+root-owned, owner-only backups (`umask 077`). A failed backup is logged
+(`docker compose logs backup`) and retried the next day; when the container
+starts, it removes `*.partial` directories left by an interrupted backup. Copy
+the backup directory off the server regularly, together with the `caddy_data`
+volume (it contains the CA private key; see "Trusting the certificate").
+
+Manual backup:
+
+```sh
+docker compose run --rm backup bash /app/scripts/backup-loop.sh --once
+```
+
+Restore (the `restore` service is only started on demand):
+
+```sh
+docker compose stop app worker
+docker compose run --rm restore /backups/docura-backup-<ts>            # checks, shows the target
+docker compose run --rm restore /backups/docura-backup-<ts> --yes --force
+docker compose run --rm migrate
+docker compose start app worker
+docker compose exec app bun run storage:check
+```
+
+After a successful restore the service prints these follow-up steps
+(`RESTORE_NEXT_STEPS`) instead of the `bun run` commands for a local setup.
+`--force` is needed because an existing installation has a non-empty database
+and upload volume (see "Restore"). Restore extracts with the owners recorded in
+the archive; for a backup made outside this stack (e.g. in development), give
+the files to uid 1000 before starting app and worker:
+`docker compose run --rm --entrypoint chown restore -R 1000:1000 /data/uploads`.
+
+### Ports other than 80/443
+
+`DOCURA_HTTP_PORT` and `DOCURA_HTTPS_PORT` are for testing only, e.g. next to
+another web server: the HTTP→HTTPS redirect always targets port 443, so set
+`DOCURA_PUBLIC_URL=https://<DOCURA_HOST>:<port>` (used for `BETTER_AUTH_URL` and
+`PASSKEY_ORIGIN`) and open the HTTPS URL directly. Use a separate project name
+for such a test stack (`docker compose -p docura-test …`) so it does not share
+volumes with a real installation.
 
 ## Processing and system status
 
@@ -161,7 +395,8 @@ stderr, a single summary line to stdout. Example crontab entry:
 0 3 * * * cd /srv/docura && flock -n /tmp/docura-backup.lock bun run backup
 ```
 
-A compose service for scheduled backups follows with the deployment setup.
+With Docker Compose, the `backup` service runs it daily (see "Deployment",
+"Backups in compose").
 
 The database is dumped first, the files afterwards. Stored files are immutable
 (UUID names), so the only possible drift is a file uploaded in between (an
@@ -194,7 +429,7 @@ and `pg_trgm`, so both a fresh database and one initialized with
    target filled in (the password replaced by `PASSWORT`).
 4. `DATABASE_URL=… bun run db:migrate` with the same `DATABASE_URL`: a no-op
    for a backup of the same version; applies newer migrations when an older
-   backup is restored into newer code. Without the prefix, Drizzle Kit reads
+   backup is restored into newer code. Without the prefix, Bun reads
    `./.env` and migrates that database instead.
 5. Start the web app and the worker against the restored target (the worker
    checks the database schema on start), then run
@@ -296,7 +531,13 @@ The dev server (Vite middleware) is not patched.
 
 The `postgres` package is listed as a devDependency but is **not used at runtime** — the app uses Bun's native SQL driver (`bun:sql`) for all database access.
 
-It exists solely because Drizzle Kit CLI commands (`db:generate`, `db:migrate`, etc.) require a recognized PostgreSQL driver package to connect to the database. Drizzle Kit does not support `bun:sql` yet.
+Migrations do not need it either: `bun run db:migrate` (`scripts/migrate.ts`)
+uses Drizzle's runtime migrator for `bun:sql`, which shares the journal table
+`drizzle.__drizzle_migrations` with Drizzle Kit, and creates the `vector` and
+`pg_trgm` extensions first (the initial migration uses `vector` before the
+migration that creates it). The same script runs in the production image.
+
+The package exists solely because the Drizzle Kit commands that connect to the database (`db:push`, `db:studio`) require a recognized PostgreSQL driver package. Drizzle Kit does not support `bun:sql` yet; `db:generate` does not connect.
 
 Upstream issue: [drizzle-orm#4122](https://github.com/drizzle-team/drizzle-orm/issues/4122)
 
@@ -311,7 +552,8 @@ Database, Ollama and Bun-specific integrations are mocked in unit tests, so a
 passing suite does not replace an end-to-end check against running services.
 
 GitHub Actions checks types, lint, tests, build, the strict changed-code audit,
-and a whole-project health floor of 88. It publishes health, duplication,
+and a whole-project health floor of 88. A second job validates
+`docker-compose.yml` and smoke-builds the production image (not pushed). It publishes health, duplication,
 dead-code and coverage reports as artifacts. The browser import boundary prevents
 runtime dependencies on database and worker modules while permitting shared
 helpers and type-only imports.

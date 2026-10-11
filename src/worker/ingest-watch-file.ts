@@ -24,6 +24,18 @@ interface IngestOptions {
   persist: (document: WatchDocument) => Promise<void>
 }
 
+// A source that cannot be removed (e.g. a root-owned watch folder) would be
+// ingested again on every rescan, so the reason must show up in the log.
+async function removeIngestedSource(filePath: string): Promise<void> {
+  await unlink(filePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    console.warn(
+      `[Watch] Importierte Datei konnte nicht entfernt werden: ${filePath}`,
+      error,
+    )
+  })
+}
+
 async function readableSource(
   filePath: string,
   options: IngestOptions,
@@ -121,7 +133,7 @@ export async function ingestWatchFile(
         `[Watch] Duplikat übersprungen (bereits vorhanden): ${filename}`,
       )
     }
-    if (!options.isPending()) await unlink(filePath).catch(() => {})
+    if (!options.isPending()) await removeIngestedSource(filePath)
   } finally {
     await unlink(tempPath).catch(() => {})
   }

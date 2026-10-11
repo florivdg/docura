@@ -222,3 +222,18 @@ test('exits with 2 when pg_restore fails and 3 when tar fails', () => {
   })
   expect(tar.status).toBe(3)
 })
+
+test('prints RESTORE_NEXT_STEPS instead of the bun commands when set', () => {
+  const { sandbox, backup, target } = sandboxWithBackup()
+  const steps =
+    '1. docker compose run --rm migrate\n2. docker compose start app worker'
+  const result = runScript(sandbox, RESTORE, [backup, '--yes'], {
+    UPLOAD_DIR: target,
+    RESTORE_NEXT_STEPS: steps,
+  })
+  expect(result.status).toBe(0)
+  expect(result.stdout).toContain(
+    'Nächste Schritte:\n  1. docker compose run --rm migrate\n  2. docker compose start app worker\n',
+  )
+  expect(result.stdout).not.toContain('bun run')
+})

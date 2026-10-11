@@ -29,6 +29,8 @@ __pycache__/
 # uploaded documents
 uploads/
 backups/
+# Caddy CA archive (contains root.key)
+caddy_data*.tgz
 
 # fallow analysis cache
 .fallow/
