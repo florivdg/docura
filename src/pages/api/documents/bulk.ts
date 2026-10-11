@@ -2,7 +2,8 @@ import type { APIRoute } from 'astro'
 import { db } from '@/db'
 import { document, documentTag, folder, tag } from '@/db/schema/documents'
 import { and, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
-import { parseJsonBody, JsonParseError } from '@/lib/api-utils'
+import { parseJsonBody } from '@/lib/api-utils'
+import { withApiErrors } from '@/lib/api-errors'
 import { ApiValidationError } from '@/lib/api-validation-error'
 import {
   validateBulkDocumentRequest,
@@ -61,19 +62,12 @@ async function applyBulkAction(
     .where(and(...conditions))
 }
 
-export const POST: APIRoute = async ({ request }) => {
-  try {
+export const POST: APIRoute = ({ request }) =>
+  withApiErrors(async () => {
     const body = validateBulkDocumentRequest(
       await parseJsonBody<unknown>(request),
     )
     await validateReferences(body)
     await db.transaction((tx) => applyBulkAction(tx, body))
     return jsonResponse({ success: true, count: body.ids.length })
-  } catch (err) {
-    if (err instanceof JsonParseError)
-      return jsonResponse({ error: err.message }, 400)
-    if (err instanceof ApiValidationError)
-      return jsonResponse({ error: err.message }, err.status)
-    throw err
-  }
-}
+  })

@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@/db'
 import { document } from '@/db/schema/documents'
-import { findOrCreateCorrespondent } from '@/lib/correspondents'
+import { findOrCreateCorrespondent } from '@/db/correspondents'
 
 export async function applyCorrespondent(
   doc: { id: string; correspondentId: string | null },
@@ -13,12 +13,6 @@ export async function applyCorrespondent(
     if (doc.correspondentId !== null) return
 
     const result = await findOrCreateCorrespondent(correspondentName)
-    if (!result) {
-      console.warn(
-        `Korrespondent "${correspondentName}" konnte nicht erstellt werden`,
-      )
-      return
-    }
 
     // Only fill an empty Korrespondent — never overwrite a manually assigned one
     const updated = await db

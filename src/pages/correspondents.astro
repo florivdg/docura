@@ -1,0 +1,8 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro'
+import CorrespondentsPage from '@/components/CorrespondentsPage.vue'
+---
+
+<AppLayout title="Korrespondenten - Docura">
+  <CorrespondentsPage client:only="vue" />
+</AppLayout>

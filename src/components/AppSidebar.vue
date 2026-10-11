@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   Archive,
+  Contact,
   FileText,
   FolderOpen,
   HardDrive,
@@ -75,6 +76,11 @@ const navMain = [
     title: 'Tags',
     url: '/tags',
     icon: Tag,
+  },
+  {
+    title: 'Korrespondenten',
+    url: '/correspondents',
+    icon: Contact,
   },
 ]
 
