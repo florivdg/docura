@@ -13,8 +13,10 @@ import {
   Tag,
   Trash2,
   Upload,
+  Users,
 } from 'lucide-vue-next'
 import { authClient } from '@/lib/auth-client'
+import { isAdmin } from '@/lib/roles'
 
 import NavDocuments from '@/components/NavDocuments.vue'
 import NavMain from '@/components/NavMain.vue'
@@ -99,7 +101,15 @@ const navDocuments = [
   },
 ]
 
-const navSecondary = [
+const usersNavItem = {
+  title: 'Benutzer',
+  url: '/users',
+  icon: Users,
+}
+
+const navSecondary = computed(() => [
+  // User management is admin-only; the page itself enforces this server-side.
+  ...(isAdmin(session.value.data?.user) ? [usersNavItem] : []),
   {
     title: 'Einstellungen',
     url: '/account',
@@ -110,7 +120,7 @@ const navSecondary = [
     url: '#',
     icon: HelpCircle,
   },
-]
+])
 </script>
 
 <template>

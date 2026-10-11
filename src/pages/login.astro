@@ -1,8 +1,13 @@
 ---
 import AuthLayout from '@/layouts/AuthLayout.astro'
 import LoginForm from '@/components/LoginForm.vue'
+import { isSmtpConfigured } from '@/lib/email'
 ---
 
 <AuthLayout title="Anmelden - Docura">
-  <LoginForm client:only="vue" class="w-full max-w-sm" />
+  <LoginForm
+    client:only="vue"
+    class="w-full max-w-sm"
+    passwordResetEnabled={isSmtpConfigured()}
+  />
 </AuthLayout>

@@ -1,0 +1,16 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro'
+import UsersPage from '@/components/UsersPage.vue'
+import { isAdmin } from '@/lib/roles'
+
+// The admin plugin endpoints enforce the role themselves; this only keeps
+// non-admins away from a page they could not use anyway.
+const { user } = Astro.locals
+if (!isAdmin(user)) {
+  return Astro.redirect('/')
+}
+---
+
+<AppLayout title="Benutzer - Docura">
+  <UsersPage client:only="vue" currentUserId={user.id} />
+</AppLayout>
