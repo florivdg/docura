@@ -24,6 +24,14 @@ export default defineConfig({
 
   output: 'server',
 
+  // Behind the TLS proxy (Caddy) the app itself speaks HTTP. Trusting the
+  // proxy's X-Forwarded-Proto/Host for https makes Astro.url and its origin
+  // check see the public https origin; otherwise every multipart upload is
+  // rejected as a cross-site form post. Only the proxy's ports are published.
+  security: {
+    allowedDomains: [{ protocol: 'https' }],
+  },
+
   vite: {
     plugins: [tailwindcss()],
     server: {

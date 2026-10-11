@@ -1,0 +1,39 @@
+# Docura reverse proxy: HTTPS with Caddy's internal CA (LAN, no public DNS).
+# The root CA lives in the caddy_data volume; losing that volume means
+# trusting a new CA on every device. See README, "Deployment".
+{
+	# Trust is installed on the clients, not in this container.
+	skip_install_trust
+	# Only TCP is published, so HTTP/3 (QUIC over UDP) stays off and no
+	# Alt-Svc header sends clients to an unreachable UDP port.
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Plain HTTP: the root certificate for installing on devices (phones cannot
+# open the HTTPS site before they trust it), everything else redirects.
+http://{$DOCURA_HOST} {
+	handle /docura-root-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		file_server
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+# No HSTS: on a device without the CA it would remove the option to proceed,
+# which blocks the first setup.
+{$DOCURA_HOST} {
+	tls internal
+	request_body {
+		# Must exceed MAX_FILE_SIZE_MB plus multipart overhead; the default
+		# is set in docker-compose.yml.
+		max_size {$DOCURA_MAX_BODY_SIZE}
+	}
+	# Caddy flushes text/event-stream (SSE) and responses without
+	# Content-Length (streamed ZIP exports) immediately.
+	reverse_proxy app:4321
+}
