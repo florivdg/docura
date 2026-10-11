@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest'
 import { createDbStub } from '@/test/db-stub'
 import { routeCaller } from '@/test/route-call'
+import { snapshotRow } from '@/test/activity-fixture'
 
 const stub = createDbStub()
 vi.doMock('@/db', () => ({ db: stub.db }))
@@ -113,10 +114,27 @@ test('DELETE removes known correspondents only', async () => {
 
 test('merge moves all documents of the sources onto the target', async () => {
   const transaction = vi.spyOn(stub.db, 'transaction')
+  const telekom = { id: target, name: 'Deutsche Telekom AG' }
+  const onCorrespondent = (id: string, name: string, ref: typeof telekom) =>
+    snapshotRow(id, {
+      name,
+      correspondentId: ref.id,
+      correspondentName: ref.name,
+    })
   stub.results.push(
     [{ id: source }, { id: other }],
-    [{ id: target, name: 'Deutsche Telekom AG' }],
+    [telekom],
     [{ id: 'd1' }, { id: 'd2' }],
+    [
+      onCorrespondent('d1', 'Rechnung', { id: source, name: 'Telekom' }),
+      onCorrespondent('d2', 'Vertrag', { id: other, name: 'T-Mobile' }),
+    ],
+    [],
+    [{ id: 'd1' }, { id: 'd2' }],
+    [
+      onCorrespondent('d1', 'Rechnung', telekom),
+      onCorrespondent('d2', 'Vertrag', telekom),
+    ],
     [],
   )
   const response = await call(merge.POST, {
@@ -124,10 +142,41 @@ test('merge moves all documents of the sources onto the target', async () => {
   })
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({
-    correspondent: { id: target, name: 'Deutsche Telekom AG' },
+    correspondent: telekom,
     movedDocuments: 2,
   })
-  expect(stub.writes).toEqual([{ correspondentId: target }])
+  expect(stub.queries).toEqual([
+    'select for update',
+    'select for key share',
+    'select',
+    'select for no key update',
+    'select',
+    'update',
+    'select for no key update',
+    'select',
+    'insert',
+    'delete',
+  ])
+  const [update, entries] = stub.writes as [unknown, { batchId: string }[]]
+  expect(update).toEqual({ correspondentId: target })
+  expect(entries).toEqual([
+    expect.objectContaining({
+      documentId: 'd1',
+      documentName: 'Rechnung',
+      action: 'updated',
+      actorName: 'Test User',
+      changes: {
+        correspondent: { from: { id: source, name: 'Telekom' }, to: telekom },
+      },
+    }),
+    expect.objectContaining({
+      documentId: 'd2',
+      changes: {
+        correspondent: { from: { id: other, name: 'T-Mobile' }, to: telekom },
+      },
+    }),
+  ])
+  expect(entries[0].batchId).toBe(entries[1].batchId)
   expect(transaction).toHaveBeenCalledTimes(1)
 })
 

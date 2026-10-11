@@ -1,137 +1,42 @@
 import type { APIRoute } from 'astro'
+import { eq } from 'drizzle-orm'
 import { withApiErrors } from '@/lib/api-errors'
-import {
-  validateDocumentPatch,
-  documentPatchUpdates,
-  type DocumentPatch,
-} from '@/lib/document-patch'
+import { validateDocumentPatch } from '@/lib/document-patch'
 import { jsonResponse } from '@/lib/json-response'
 import { db } from '@/db'
 import {
-  correspondent,
-  document,
-  processingJob,
-  documentTag,
-  tag,
-  folder,
-} from '@/db/schema/documents'
-import { eq, desc, inArray } from 'drizzle-orm'
+  documentExists,
+  findDocument,
+  loadDocumentDetail,
+} from '@/db/document-detail'
+import { applyDocumentPatch, trashDocument } from '@/db/document-patch-apply'
+import { countExistingTags, referenceExists } from '@/db/reference-validation'
+import { document } from '@/db/schema/documents'
 import { isValidUUID, parseJsonBody } from '@/lib/api-utils'
+import { actorFromLocals } from '@/lib/server/activity-actor'
 import { removeDocumentsPermanently } from '@/lib/server/document-removal'
 import { STORAGE_CONFIG } from '@/lib/server/storage-config'
 
-async function loadCorrespondent(
-  correspondentId: string | null,
-): Promise<{ id: string; name: string } | null> {
-  if (!correspondentId) return null
+const invalidId = () => jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
+const notFound = () => jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
 
-  const rows = await db
-    .select({ id: correspondent.id, name: correspondent.name })
-    .from(correspondent)
-    .where(eq(correspondent.id, correspondentId))
-    .limit(1)
-
-  return rows[0] ?? null
-}
-
-type DocumentRow = typeof document.$inferSelect
-
-/** Lädt Ordner, Korrespondent, Tags und Jobs eines Dokuments parallel. */
-async function loadDocumentRelations(doc: DocumentRow) {
-  const [docFolder, docCorrespondent, tags, processingJobs] = await Promise.all(
-    [
-      doc.folderId
-        ? db
-            .select({ id: folder.id, name: folder.name })
-            .from(folder)
-            .where(eq(folder.id, doc.folderId))
-            .limit(1)
-            .then((rows) => rows[0] ?? null)
-        : null,
-      loadCorrespondent(doc.correspondentId),
-      db
-        .select({ id: tag.id, name: tag.name, color: tag.color })
-        .from(documentTag)
-        .innerJoin(tag, eq(documentTag.tagId, tag.id))
-        .where(eq(documentTag.documentId, doc.id)),
-      db
-        .select({
-          id: processingJob.id,
-          status: processingJob.status,
-          kind: processingJob.kind,
-          step: processingJob.step,
-          errorMessage: processingJob.errorMessage,
-          attempts: processingJob.attempts,
-          maxAttempts: processingJob.maxAttempts,
-          startedAt: processingJob.startedAt,
-          completedAt: processingJob.completedAt,
-          createdAt: processingJob.createdAt,
-        })
-        .from(processingJob)
-        .where(eq(processingJob.documentId, doc.id))
-        .orderBy(desc(processingJob.createdAt)),
-    ],
-  )
-
-  return {
-    folder: docFolder,
-    correspondent: docCorrespondent,
-    tags,
-    processingJobs,
-  }
-}
-
-async function documentResponse(doc: DocumentRow): Promise<Response> {
-  const relations = await loadDocumentRelations(doc)
-
-  return jsonResponse({
-    document: {
-      id: doc.id,
-      name: doc.name,
-      mimeType: doc.mimeType,
-      fileSize: doc.fileSize,
-      isFavorite: doc.isFavorite,
-      archivedAt: doc.archivedAt,
-      trashedAt: doc.trashedAt,
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-      documentDate: doc.documentDate,
-      textContent: doc.textContent,
-      folder: relations.folder,
-      correspondent: relations.correspondent,
-      tags: relations.tags,
-      processingJobs: relations.processingJobs,
-    },
-  })
+async function documentResponse(id: string): Promise<Response> {
+  const doc = await findDocument(id)
+  if (!doc) return notFound()
+  return jsonResponse({ document: await loadDocumentDetail(doc) })
 }
 
 export const GET: APIRoute = async ({ params }) => {
   const { id } = params
-
-  if (!id || !isValidUUID(id)) {
-    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
-  }
-
-  const [doc] = await db
-    .select()
-    .from(document)
-    .where(eq(document.id, id))
-    .limit(1)
-
-  if (!doc) {
-    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
-  }
-
-  return documentResponse(doc)
+  if (!id || !isValidUUID(id)) return invalidId()
+  return documentResponse(id)
 }
 
-export const DELETE: APIRoute = async ({ params, url }) => {
+export const DELETE: APIRoute = async ({ params, url, locals }) => {
   const { id } = params
   const permanent = url.searchParams.get('permanent') === 'true'
 
-  if (!id || !isValidUUID(id)) {
-    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
-  }
+  if (!id || !isValidUUID(id)) return invalidId()
 
   const [doc] = await db
     .select({
@@ -142,9 +47,7 @@ export const DELETE: APIRoute = async ({ params, url }) => {
     .where(eq(document.id, id))
     .limit(1)
 
-  if (!doc) {
-    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
-  }
+  if (!doc) return notFound()
 
   if (permanent) {
     if (!doc.trashedAt) {
@@ -160,6 +63,7 @@ export const DELETE: APIRoute = async ({ params, url }) => {
       db,
       eq(document.id, id),
       STORAGE_CONFIG.uploadDir,
+      actorFromLocals(locals),
     )
     return jsonResponse({ success: true })
   }
@@ -174,88 +78,24 @@ export const DELETE: APIRoute = async ({ params, url }) => {
     )
   }
 
-  // Soft delete: set trashedAt
-  await db
-    .update(document)
-    .set({ trashedAt: new Date() })
-    .where(eq(document.id, id))
-
+  await trashDocument(id, actorFromLocals(locals))
   return jsonResponse({ success: true })
 }
 
-async function applyPatch(id: string, body: DocumentPatch): Promise<void> {
-  const { tagIds } = body
-  const updates = documentPatchUpdates(body)
-
-  await db.transaction(async (tx) => {
-    if (Object.keys(updates).length > 0) {
-      await tx.update(document).set(updates).where(eq(document.id, id))
-    }
-
-    if ('tagIds' in body && Array.isArray(tagIds)) {
-      await tx.delete(documentTag).where(eq(documentTag.documentId, id))
-
-      if (tagIds.length > 0) {
-        await tx
-          .insert(documentTag)
-          .values(tagIds.map((tagId) => ({ documentId: id, tagId })))
-      }
-    }
-  })
-}
-
-export const PATCH: APIRoute = ({ params, request }) =>
+export const PATCH: APIRoute = ({ params, request, locals }) =>
   withApiErrors(async () => {
     const { id } = params
 
-    if (!id || !isValidUUID(id)) {
-      return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
-    }
-
-    const [doc] = await db
-      .select({ id: document.id })
-      .from(document)
-      .where(eq(document.id, id))
-      .limit(1)
-
-    if (!doc) {
-      return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
-    }
+    if (!id || !isValidUUID(id)) return invalidId()
+    if (!(await documentExists(id))) return notFound()
 
     const body = await validateDocumentPatch(
       await parseJsonBody<unknown>(request),
       referenceExists,
       countExistingTags,
     )
-    await applyPatch(id, body)
+    await applyDocumentPatch(id, body, actorFromLocals(locals))
 
     // Return updated document in same shape as GET
-    const [updated] = await db
-      .select()
-      .from(document)
-      .where(eq(document.id, id))
-      .limit(1)
-
-    return documentResponse(updated)
+    return documentResponse(id)
   })
-
-async function referenceExists(
-  kind: 'folder' | 'correspondent',
-  id: string,
-): Promise<boolean> {
-  const table = kind === 'folder' ? folder : correspondent
-  const rows = await db
-    .select({ id: table.id })
-    .from(table)
-    .where(eq(table.id, id))
-    .limit(1)
-  return rows.length > 0
-}
-
-async function countExistingTags(ids: string[]): Promise<number> {
-  const rows = await db
-    .select({ id: tag.id })
-    .from(tag)
-    .where(inArray(tag.id, ids))
-  return rows.length
-}

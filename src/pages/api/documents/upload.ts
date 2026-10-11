@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { document, folder, processingJob } from '@/db/schema/documents'
+import { insertUploadedDocument } from '@/db/document-ingest'
+import { folder } from '@/db/schema/documents'
 import { isValidUUID } from '@/lib/api-utils'
 import { withApiErrors } from '@/lib/api-errors'
 import { ApiValidationError } from '@/lib/api-validation-error'
@@ -13,6 +14,8 @@ import { computeSha256 } from '@/lib/hash'
 import { ALLOWED_MIME_TYPES, validateMagicBytes } from '@/lib/file-validation'
 import { jsonResponse } from '@/lib/json-response'
 import { findDocumentBySha256, type DuplicateDocument } from '@/db/queries'
+import type { ActivityActor } from '@/lib/activity'
+import { actorFromLocals } from '@/lib/server/activity-actor'
 import { STORAGE_CONFIG } from '@/lib/server/storage-config'
 
 interface UploadRequest {
@@ -29,6 +32,7 @@ interface StoredUpload {
   filename: string
   buffer: Buffer
   sha256: string
+  actor: ActivityActor
 }
 
 function duplicateResponse(existing?: DuplicateDocument): Response {
@@ -76,36 +80,30 @@ async function assertFolderExists(folderId: string | null): Promise<void> {
   if (!existingFolder) throw new ApiValidationError('Ordner nicht gefunden')
 }
 
-/** Writes the file, then the document row and its processing job. */
+/** Writes the file, then the document row, its processing job and activity. */
 async function storeUpload(
   upload: StoredUpload,
   uploadDir: string,
 ): Promise<Response> {
-  const { file, folderId, filename, buffer, sha256 } = upload
+  const { file, folderId, filename, buffer, sha256, actor } = upload
   const storagePath = join(uploadDir, filename)
   try {
     await writeFile(storagePath, buffer)
 
-    const result = await db.transaction(async (tx) => {
-      const [doc] = await tx
-        .insert(document)
-        .values({
+    const result = await db.transaction((tx) =>
+      insertUploadedDocument(
+        tx,
+        {
           name: file.name,
           mimeType: file.type,
           fileSize: file.size,
           storagePath: filename,
           sha256,
           folderId: folderId || null,
-        })
-        .returning()
-
-      const [job] = await tx
-        .insert(processingJob)
-        .values({ documentId: doc.id })
-        .returning()
-
-      return { document: doc, processingJobId: job.id }
-    })
+        },
+        actor,
+      ),
+    )
 
     return jsonResponse(result, 201)
   } catch (error) {
@@ -120,7 +118,7 @@ async function storeUpload(
   }
 }
 
-export const POST: APIRoute = ({ request }) =>
+export const POST: APIRoute = ({ request, locals }) =>
   withApiErrors(async () => {
     const uploadDir = STORAGE_CONFIG.uploadDir
     const { file, folderId, ext } = await readUploadRequest(request)
@@ -138,5 +136,15 @@ export const POST: APIRoute = ({ request }) =>
     if (duplicate) return duplicateResponse(duplicate)
 
     const filename = `${randomUUID()}.${ext}`
-    return storeUpload({ file, folderId, filename, buffer, sha256 }, uploadDir)
+    return storeUpload(
+      {
+        file,
+        folderId,
+        filename,
+        buffer,
+        sha256,
+        actor: actorFromLocals(locals),
+      },
+      uploadDir,
+    )
   })

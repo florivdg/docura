@@ -1,7 +1,9 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Transaction } from '@/db'
+import { withActivity } from '@/db/activity'
 import { activeDocumentConditions } from '@/db/queries'
 import { correspondent, document } from '@/db/schema/documents'
+import type { ActivityActor } from '@/lib/activity'
 import { ApiValidationError } from '@/lib/api-validation-error'
 import type { CorrespondentMergeRequest } from '@/lib/correspondent-validation'
 import { isUniqueViolation } from '@/lib/db-errors'
@@ -117,9 +119,42 @@ export async function deleteCorrespondent(id: string): Promise<void> {
   if (!deleted.length) throw notFound()
 }
 
+async function lockMergeParties(
+  tx: Transaction,
+  { targetId, sourceIds }: CorrespondentMergeRequest,
+) {
+  const sources = await tx
+    .select({ id: correspondent.id })
+    .from(correspondent)
+    .where(inArray(correspondent.id, sourceIds))
+    .orderBy(asc(correspondent.id))
+    .for('update')
+  const [target] = await tx
+    .select(RECORD_FIELDS)
+    .from(correspondent)
+    .where(eq(correspondent.id, targetId))
+    .for('key share')
+  if (!target || sources.length !== sourceIds.length)
+    throw new ApiValidationError(
+      'Ein oder mehrere Korrespondenten nicht gefunden',
+      404,
+    )
+  return target
+}
+
+/** The documents of the sources; `withActivity` locks them afterwards. */
+async function documentsOf(tx: Transaction, sourceIds: string[]) {
+  const rows = await tx
+    .select({ id: document.id })
+    .from(document)
+    .where(inArray(document.correspondentId, sourceIds))
+  return rows.map((row) => row.id)
+}
+
 /**
  * Moves every document of the sources onto the target (trashed and archived
- * ones included) and deletes the sources, all in one transaction.
+ * ones included) and deletes the sources, all in one transaction; every
+ * moved document gets an `updated` entry in the audit trail.
  *
  * The sources are locked FOR UPDATE in id order, so concurrent merges with
  * overlapping sources acquire those locks in the same order. The target is
@@ -127,37 +162,27 @@ export async function deleteCorrespondent(id: string): Promise<void> {
  * and a stronger lock would conflict with the key-share locks that concurrent
  * document updates take on their FK target. Merges whose target is another
  * merge's source can still deadlock; Postgres aborts one of them, which then
- * surfaces as a failed request.
+ * surfaces as a failed request. Assigning a document to a locked source
+ * waits for the merge, so the documents read up front stay complete.
  */
-export function mergeCorrespondents({
-  targetId,
-  sourceIds,
-}: CorrespondentMergeRequest): Promise<{
+export function mergeCorrespondents(
+  request: CorrespondentMergeRequest,
+  actor: ActivityActor,
+): Promise<{
   correspondent: CorrespondentRecord
   movedDocuments: number
 }> {
+  const { sourceIds } = request
   return db.transaction(async (tx) => {
-    const sources = await tx
-      .select({ id: correspondent.id })
-      .from(correspondent)
-      .where(inArray(correspondent.id, sourceIds))
-      .orderBy(asc(correspondent.id))
-      .for('update')
-    const [target] = await tx
-      .select(RECORD_FIELDS)
-      .from(correspondent)
-      .where(eq(correspondent.id, targetId))
-      .for('key share')
-    if (!target || sources.length !== sourceIds.length)
-      throw new ApiValidationError(
-        'Ein oder mehrere Korrespondenten nicht gefunden',
-        404,
-      )
-    const moved = await tx
-      .update(document)
-      .set({ correspondentId: targetId })
-      .where(inArray(document.correspondentId, sourceIds))
-      .returning({ id: document.id })
+    const target = await lockMergeParties(tx, request)
+    const ids = await documentsOf(tx, sourceIds)
+    const moved = await withActivity(tx, ids, actor, () =>
+      tx
+        .update(document)
+        .set({ correspondentId: target.id })
+        .where(inArray(document.correspondentId, sourceIds))
+        .returning({ id: document.id }),
+    )
     await tx.delete(correspondent).where(inArray(correspondent.id, sourceIds))
     return { correspondent: target, movedDocuments: moved.length }
   })

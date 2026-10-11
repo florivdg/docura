@@ -10,6 +10,9 @@ interface RouteRequest {
   path?: string
 }
 
+/** The signed-in user the middleware would put into `locals`. */
+export const TEST_USER = { id: 'user-1', name: 'Test User' }
+
 /**
  * Route contract test scaffolding: empties the stub's queues before each test
  * and returns `call`, which invokes an Astro route with a minimal context.
@@ -26,6 +29,7 @@ export function routeCaller(
   ): Promise<Response> {
     const response = await route({
       params: { id },
+      locals: { user: TEST_USER },
       url: new URL(path, 'http://localhost'),
       request: new Request('http://localhost', {
         method: 'POST',

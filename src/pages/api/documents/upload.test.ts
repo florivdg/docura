@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs'
 import type { APIContext } from 'astro'
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest'
 import { createDbStub } from '@/test/db-stub'
+import { TEST_USER } from '@/test/route-call'
 import { tempDir } from '@/test/temp-dir'
 
 const uploadDir = tempDir('upload')
@@ -31,7 +32,10 @@ async function upload(fields: Record<string, string | File> | string) {
     headers:
       typeof body === 'string' ? { 'Content-Type': 'multipart/form-data' } : {},
   })
-  const response = await POST({ request } as unknown as APIContext)
+  const response = await POST({
+    request,
+    locals: { user: TEST_USER },
+  } as unknown as APIContext)
   return { status: response.status, body: await response.json() }
 }
 
@@ -77,12 +81,17 @@ test('returns 409 for known content without storing the file', async () => {
   expect(readdirSync(uploadDir)).toEqual([])
 })
 
-test('stores the file, the document and its processing job', async () => {
-  stub.results.push([{ id: FOLDER_ID }], [], [{ id: 'doc' }], [{ id: 'job' }])
+test('stores the file, the document, its processing job and activity', async () => {
+  stub.results.push(
+    [{ id: FOLDER_ID }],
+    [],
+    [{ id: 'doc', name: 'Rechnung.pdf' }],
+    [{ id: 'job' }],
+  )
   const result = await upload({ file: pdf(), folderId: FOLDER_ID })
   expect(result.status).toBe(201)
   expect(result.body).toEqual({
-    document: { id: 'doc' },
+    document: { id: 'doc', name: 'Rechnung.pdf' },
     processingJobId: 'job',
   })
   expect(stub.writes[0]).toMatchObject({
@@ -90,6 +99,17 @@ test('stores the file, the document and its processing job', async () => {
     mimeType: 'application/pdf',
     folderId: FOLDER_ID,
   })
+  expect(stub.writes[2]).toEqual([
+    expect.objectContaining({
+      documentId: 'doc',
+      documentName: 'Rechnung.pdf',
+      action: 'uploaded',
+      actorType: 'user',
+      actorId: 'user-1',
+      actorName: 'Test User',
+    }),
+  ])
+  expect(stub.queries.slice(-3)).toEqual(['insert', 'insert', 'insert'])
   expect(readdirSync(uploadDir)).toHaveLength(1)
 })
 

@@ -141,12 +141,14 @@ export async function passkeyLogin(page: Page): Promise<void> {
   await signedIn
 }
 
-export async function sessionEmail(page: Page): Promise<string | undefined> {
-  const { body } = await api<{ user?: { email?: string } } | null>(
-    page,
-    '/api/auth/get-session',
-  )
-  return body?.user?.email
+/** The signed-in user; undefined without a session. */
+export async function sessionUser(
+  page: Page,
+): Promise<{ email?: string; name?: string } | undefined> {
+  const { body } = await api<{
+    user?: { email?: string; name?: string }
+  } | null>(page, '/api/auth/get-session')
+  return body?.user
 }
 
 /** Renders HTML in a throwaway page and passes that page to `capture`. */

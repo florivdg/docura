@@ -13,7 +13,7 @@ import {
   passwordLogin,
   renderPdf,
   renderPng,
-  sessionEmail,
+  sessionUser,
   type SmokeBrowser,
 } from './browser'
 import {
@@ -31,6 +31,7 @@ import {
   leftoverLines,
   llmMetadataApplied,
   llmMetadataLine,
+  missingActivity,
   newCorrespondents,
   poll,
   processingDone,
@@ -42,6 +43,7 @@ import {
   uploadOutcome,
   withTimeout,
   type JobState,
+  type ActivityLine,
   type Leftovers,
   type LlmMetadata,
   type UploadResult,
@@ -173,7 +175,7 @@ async function registerPasskey(run: Run): Promise<void> {
 async function loginWithPasskey({ config, browser }: Run): Promise<void> {
   await browser.context.clearCookies()
   await passkeyLogin(browser.page)
-  const email = await sessionEmail(browser.page)
+  const email = (await sessionUser(browser.page))?.email
   check(
     email?.toLowerCase() === config.email.toLowerCase(),
     `Sitzung gehört nicht zu ${config.email} (angemeldet: ${email ?? 'niemand'})`,
@@ -413,6 +415,36 @@ async function trashAndRestore(run: Run): Promise<void> {
   info('wiederhergestellt und wieder in der Liste')
 }
 
+// --- Audit trail -------------------------------------------------------------
+
+/** Upload, KI-Analyse, trash and restore are recorded, and the dashboard shows them. */
+async function checkActivity(run: Run): Promise<void> {
+  const { page } = run.browser
+  const id = documentId(run, run.fixtures.pdf.name)
+  const history = await api<{ entries: ActivityLine[] }>(
+    page,
+    `/api/documents/${id}/activity?size=100`,
+  )
+  check(
+    history.status === 200,
+    `Verlauf nicht abrufbar (HTTP ${history.status})`,
+  )
+  const missing = missingActivity(
+    history.body.entries,
+    (await sessionUser(page))?.name ?? '',
+  )
+  check(!missing, `Verlauf unvollständig, es fehlt: ${missing}`)
+  const recent = await api<{ entries: { document: { id: string | null } }[] }>(
+    page,
+    '/api/activity?limit=50',
+  )
+  check(
+    recent.body.entries.some((entry) => entry.document.id === id),
+    'Letzte Aktivität auf dem Dashboard enthält das PDF nicht',
+  )
+  info(`${history.body.entries.length} Einträge im Verlauf, Dashboard aktuell`)
+}
+
 // --- Cleanup -----------------------------------------------------------------
 
 async function deleteDocument(
@@ -536,7 +568,7 @@ async function deletePasskeyViaApi(run: Run, page: Page): Promise<void> {
 /** After a failure the session may be gone (e.g. during the passkey step). */
 async function ensureSession(run: Run, page: Page): Promise<void> {
   await page.goto('/')
-  if (!(await sessionEmail(page))) await passwordLogin(page, run.config)
+  if (!(await sessionUser(page))?.email) await passwordLogin(page, run.config)
 }
 
 /** Independent attempts: one failing does not skip the other. */
@@ -630,6 +662,7 @@ const STEPS: [string, (run: Run) => Promise<void>][] = [
   ['Volltextsuche findet das Bild (OCR)', searchImage],
   ['Semantische Suche findet das PDF', searchSemantic],
   ['Papierkorb und Wiederherstellen', trashAndRestore],
+  ['Verlauf des PDFs', checkActivity],
   [
     'Testdokumente endgültig löschen',
     (run) => removeDocuments(run, run.browser.page),

@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import {
+  missingActivity,
   check,
   checkNoFailures,
   cleanupComplete,
@@ -320,4 +321,26 @@ test('leftoverLines without reasons blames the missing upload responses', () => 
     'Aufräumen unvollständig: Upload-Antworten fehlen',
     'Bitte manuell löschen: Dokumente keine.',
   ])
+})
+
+test('missingActivity expects upload, analysis, trash and restore in order', () => {
+  const line = (action: string, actorName = 'Anna', actorType = 'user') => ({
+    action,
+    actorType,
+    actorName,
+  })
+  const analysis = line('updated', 'KI-Analyse', 'system')
+  const history = [
+    line('restored'),
+    line('trashed'),
+    analysis,
+    line('updated'),
+    line('uploaded'),
+  ]
+  expect(missingActivity(history, 'Anna')).toBeUndefined()
+  expect(missingActivity(history, 'Bob')).toBe('uploaded (Bob)')
+  expect(missingActivity(history.slice(2), 'Anna')).toBe('trashed (Anna)')
+  expect(
+    missingActivity([line('trashed'), analysis, line('uploaded')], 'Anna'),
+  ).toBe('restored (Anna)')
 })

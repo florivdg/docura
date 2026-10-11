@@ -269,3 +269,40 @@ export function leftoverLines(
     )
   return lines
 }
+
+/** The fields of a history entry (`/api/documents/[id]/activity`) checked here. */
+export interface ActivityLine {
+  action: string
+  actorType: string
+  actorName: string
+}
+
+/**
+ * The first expected entry the history (newest first) lacks, in
+ * chronological order: the user's upload, the KI-Analyse, the user's trash
+ * and restore. Undefined when all appear in that order.
+ */
+export function missingActivity(
+  entries: ActivityLine[],
+  userName: string,
+): string | undefined {
+  const expected: ActivityLine[] = [
+    { action: 'uploaded', actorType: 'user', actorName: userName },
+    { action: 'updated', actorType: 'system', actorName: 'KI-Analyse' },
+    { action: 'trashed', actorType: 'user', actorName: userName },
+    { action: 'restored', actorType: 'user', actorName: userName },
+  ]
+  let next = 0
+  for (const entry of [...entries].reverse()) {
+    const wanted = expected[next]
+    if (
+      wanted &&
+      entry.action === wanted.action &&
+      entry.actorType === wanted.actorType &&
+      entry.actorName === wanted.actorName
+    )
+      next += 1
+  }
+  const missing = expected[next]
+  return missing && `${missing.action} (${missing.actorName})`
+}
