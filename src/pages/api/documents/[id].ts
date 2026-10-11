@@ -1,5 +1,5 @@
-import { ApiValidationError } from '@/lib/api-validation-error'
 import type { APIRoute } from 'astro'
+import { withApiErrors } from '@/lib/api-errors'
 import {
   validateDocumentPatch,
   documentPatchUpdates,
@@ -17,12 +17,7 @@ import {
 } from '@/db/schema/documents'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { unlink } from 'node:fs/promises'
-import {
-  isValidUUID,
-  safePath,
-  parseJsonBody,
-  JsonParseError,
-} from '@/lib/api-utils'
+import { isValidUUID, safePath, parseJsonBody } from '@/lib/api-utils'
 
 async function loadCorrespondent(
   correspondentId: string | null,
@@ -191,37 +186,7 @@ export const DELETE: APIRoute = async ({ params, url }) => {
   return jsonResponse({ success: true })
 }
 
-export const PATCH: APIRoute = async ({ params, request }) => {
-  const { id } = params
-
-  if (!id || !isValidUUID(id)) {
-    return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
-  }
-
-  const [doc] = await db
-    .select({ id: document.id })
-    .from(document)
-    .where(eq(document.id, id))
-    .limit(1)
-
-  if (!doc) {
-    return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
-  }
-
-  let body: DocumentPatch
-  try {
-    body = await validateDocumentPatch(
-      await parseJsonBody<unknown>(request),
-      referenceExists,
-      countExistingTags,
-    )
-  } catch (err) {
-    if (err instanceof JsonParseError)
-      return jsonResponse({ error: err.message }, 400)
-    if (err instanceof ApiValidationError)
-      return jsonResponse({ error: err.message }, err.status)
-    throw err
-  }
+async function applyPatch(id: string, body: DocumentPatch): Promise<void> {
   const { tagIds } = body
   const updates = documentPatchUpdates(body)
 
@@ -240,16 +205,42 @@ export const PATCH: APIRoute = async ({ params, request }) => {
       }
     }
   })
-
-  // Return updated document in same shape as GET
-  const [updated] = await db
-    .select()
-    .from(document)
-    .where(eq(document.id, id))
-    .limit(1)
-
-  return documentResponse(updated)
 }
+
+export const PATCH: APIRoute = ({ params, request }) =>
+  withApiErrors(async () => {
+    const { id } = params
+
+    if (!id || !isValidUUID(id)) {
+      return jsonResponse({ error: 'Ungültige Dokument-ID' }, 400)
+    }
+
+    const [doc] = await db
+      .select({ id: document.id })
+      .from(document)
+      .where(eq(document.id, id))
+      .limit(1)
+
+    if (!doc) {
+      return jsonResponse({ error: 'Dokument nicht gefunden' }, 404)
+    }
+
+    const body = await validateDocumentPatch(
+      await parseJsonBody<unknown>(request),
+      referenceExists,
+      countExistingTags,
+    )
+    await applyPatch(id, body)
+
+    // Return updated document in same shape as GET
+    const [updated] = await db
+      .select()
+      .from(document)
+      .where(eq(document.id, id))
+      .limit(1)
+
+    return documentResponse(updated)
+  })
 
 async function referenceExists(
   kind: 'folder' | 'correspondent',

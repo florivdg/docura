@@ -1,6 +1,9 @@
-/** A queued query adapter for route contract tests; no network or database required. */
+/**
+ * A queued query adapter for route contract tests; no network or database
+ * required. Queue an `Error` to make the next query reject with it.
+ */
 export function createDbStub() {
-  const results: unknown[][] = []
+  const results: (unknown[] | Error)[] = []
   const writes: unknown[] = []
   function builder() {
     const chain = {
@@ -12,6 +15,7 @@ export function createDbStub() {
       groupBy: () => chain,
       innerJoin: () => chain,
       leftJoin: () => chain,
+      for: () => chain,
       onConflictDoNothing: () => chain,
       returning: () => chain,
       as: () => ({ documentId: undefined, maxCreatedAt: undefined }),
@@ -24,8 +28,15 @@ export function createDbStub() {
         return chain
       },
       // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are deliberately lazy thenables.
-      then: (resolve: (value: unknown[]) => unknown) =>
-        Promise.resolve(results.shift() ?? []).then(resolve),
+      then: (
+        resolve: (value: unknown[]) => unknown,
+        reject: (reason: unknown) => unknown,
+      ) => {
+        const next = results.shift() ?? []
+        return (
+          next instanceof Error ? Promise.reject(next) : Promise.resolve(next)
+        ).then(resolve, reject)
+      },
     }
     return chain
   }
@@ -34,8 +45,13 @@ export function createDbStub() {
     insert: builder,
     update: builder,
     delete: builder,
-    transaction: async (callback: (tx: unknown) => Promise<void>) =>
+    transaction: async <T>(callback: (tx: unknown) => Promise<T>) =>
       callback(db),
   }
-  return { db, results, writes }
+  /** Empties both queues; meant for `beforeEach(stub.reset)`. */
+  function reset() {
+    results.length = 0
+    writes.length = 0
+  }
+  return { db, results, writes, reset }
 }

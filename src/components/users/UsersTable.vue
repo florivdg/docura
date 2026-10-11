@@ -21,6 +21,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import StatusMessage from '@/components/StatusMessage.vue'
 import CreateUserDialog from '@/components/users/CreateUserDialog.vue'
 import SetPasswordDialog from '@/components/users/SetPasswordDialog.vue'
 import UserActionDialog from '@/components/users/UserActionDialog.vue'
@@ -73,10 +74,7 @@ onMounted(fetchUsers)
 
 <template>
   <div class="flex items-center justify-between gap-4">
-    <div class="text-sm">
-      <p v-if="error" class="text-destructive">{{ error }}</p>
-      <p v-else-if="notice" class="text-emerald-600">{{ notice }}</p>
-    </div>
+    <StatusMessage :error="error" :notice="notice" />
     <Button size="sm" @click="createOpen = true">
       <Plus class="size-4" />
       Neuer Benutzer

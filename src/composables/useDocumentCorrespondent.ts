@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { apiFetch } from '@/lib/api-fetch'
+import { useApiRequest } from './useApiRequest'
 import type { DocumentCorrespondent } from '@/lib/document-detail'
 import type { Ref } from 'vue'
 import type { DocumentData, PatchDocument } from '@/lib/document-detail'
@@ -15,7 +15,7 @@ export function useDocumentCorrespondent(
     )
   const correspondentPopoverOpen = ref(false)
   const correspondentSearch = ref('')
-  const creatingCorrespondent = ref(false)
+  const { pending: creatingCorrespondent, run } = useApiRequest()
   watch(correspondentPopoverOpen, (open) => {
     if (!open) correspondentSearch.value = ''
   })
@@ -39,29 +39,22 @@ export function useDocumentCorrespondent(
     const name = correspondentSearch.value.trim()
     if (!name || creatingCorrespondent.value) return
 
-    creatingCorrespondent.value = true
-    try {
-      const res = await apiFetch('/api/correspondents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      })
-      if (!res.ok) return
+    // Failures are silent here: the popover stays open for another attempt.
+    const data = await run<{ correspondent: DocumentCorrespondent }>(
+      '/api/correspondents',
+      'Korrespondent konnte nicht erstellt werden.',
+      { method: 'POST', body: { name } },
+    )
+    if (!data) return
 
-      const data = await res.json()
-      const created = data.correspondent as DocumentCorrespondent
-      if (!allCorrespondents.value.some((c) => c.id === created.id)) {
-        allCorrespondents.value = [...allCorrespondents.value, created].sort(
-          (a, b) => a.name.localeCompare(b.name, 'de'),
-        )
-      }
-      correspondentPopoverOpen.value = false
-      await applyCorrespondent(created)
-    } catch {
-      // ignore
-    } finally {
-      creatingCorrespondent.value = false
+    const created = data.correspondent
+    if (!allCorrespondents.value.some((c) => c.id === created.id)) {
+      allCorrespondents.value = [...allCorrespondents.value, created].sort(
+        (a, b) => a.name.localeCompare(b.name, 'de'),
+      )
     }
+    correspondentPopoverOpen.value = false
+    await applyCorrespondent(created)
   }
 
   return {

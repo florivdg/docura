@@ -5,17 +5,7 @@ import {
   type AdminUserRow,
   type UserActionKind,
 } from '@/composables/useUserAdmin'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { buttonVariants } from '@/components/ui/button'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const props = defineProps<{
   pending: { kind: UserActionKind; user: AdminUserRow } | null
@@ -31,25 +21,12 @@ const copy = computed(() => {
 </script>
 
 <template>
-  <AlertDialog v-model:open="open">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>{{ copy?.title }}</AlertDialogTitle>
-        <AlertDialogDescription>{{ copy?.description }}</AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-        <AlertDialogAction
-          :class="
-            copy?.destructive
-              ? buttonVariants({ variant: 'destructive' })
-              : undefined
-          "
-          @click="emit('confirm')"
-        >
-          {{ copy?.confirmLabel }}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
+  <ConfirmDialog
+    v-model:open="open"
+    :title="copy?.title ?? ''"
+    :description="copy?.description ?? ''"
+    :confirm-label="copy?.confirmLabel ?? ''"
+    :destructive="copy?.destructive"
+    @confirm="emit('confirm')"
+  />
 </template>
