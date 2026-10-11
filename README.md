@@ -369,7 +369,9 @@ mocks. Run it after every deployment and update. It signs in with password and
 passkey (virtual authenticator), uploads a PDF and an image with random content
 through the upload dialog, waits for processing, checks the PDF's LLM metadata,
 full-text, OCR and semantic search (the PDF has to rank ahead of the run's
-unrelated image), moves the PDF to the trash and restores it. It removes its
+unrelated image), moves the PDF to the trash and restores it, and checks the
+PDF's Verlauf (upload, KI-Analyse, trash and restore in that order) and the
+dashboard's „Letzte Aktivität“. It removes its
 documents and its passkey, also when a step fails or the run is aborted with
 Ctrl+C. Correspondents the LLM created for the test documents are not deleted
 automatically, because they may already be used by other documents; the run
@@ -432,6 +434,8 @@ cannot run:
 - [ ] Full-text search finds a word from the PDF and a word from the image;
       semantic search with a paraphrase finds the PDF.
 - [ ] Move a document to the trash, find it under Papierkorb, restore it.
+- [ ] The document's „Verlauf“ card lists the upload, the KI-Analyse, the
+      trash and the restore.
 - [ ] Delete the test documents permanently and remove the test passkey.
 
 ## Processing and system status
@@ -447,6 +451,46 @@ installed), and the queue counts. Queue counts use each document's latest job.
 "Ausstehend" and "In Verarbeitung" include archived documents (e.g. during a
 re-embedding); "Fehlgeschlagen" only counts the regular document list (not
 archived or trashed), so it matches the list filter `/documents?status=failed`.
+
+## Verlauf (Audit-Trail)
+
+Every change to a document is recorded in `document_activity`: who (user or
+system source) did what and when. The document detail page shows it in the
+„Verlauf“ card below „Verarbeitung“; the dashboard's „Letzte Aktivität“ shows
+the newest requests, with bulk actions collapsed into one line („Anna hat 12
+Dokumente in den Papierkorb verschoben“). Recorded are:
+
+- uploads (by the user, or `Watch-Ordner` for the watch folder),
+- metadata edits (name, folder, correspondent, Belegdatum, tags, favorite)
+  with old and new values, from the detail page, bulk actions, correspondent
+  merges and the LLM analysis (`KI-Analyse`; only fields it actually set),
+- archive and unarchive, trash and restore,
+- permanent deletion (by the user, or `Papierkorb-Bereinigung` for the
+  automatic trash cleanup),
+- reprocessing requests that queued a new job or turned a pending
+  embedding-only job into a full run (a repeated click on a pending job adds
+  nothing).
+
+Each entry is written in the same transaction as its change, except the
+`KI-Analyse` entries: the LLM analysis writes its metadata outside a shared
+transaction, and its entry is recorded right after those writes (also when a
+later step fails). That recording is best-effort and only logged on failure.
+Names of the
+document, the user and the referenced folder, correspondent and tags are
+stored as they were, so entries stay readable after a document is deleted
+(it is then shown as „(gelöscht)“, without link) or a user is removed.
+
+Not recorded: processing steps, failures and results (see the „Verarbeitung“
+card), extracted text and embeddings, renaming a correspondent, side effects
+of deleting a folder, tag or correspondent on its documents, `backfill:sha256`
+and the embedding scripts. A manual edit of a field the LLM analysis also
+sets, made during the few seconds of the analysis, is attributed to
+`KI-Analyse`; edits of other fields are not.
+
+The trail is append-only and kept indefinitely; a retention period
+(`ACTIVITY_RETENTION_DAYS`) may follow. All signed-in users see the names of
+whoever made a change, as the library itself is shared; IP addresses and user
+agents are not stored.
 
 ## Changing the embedding model
 
@@ -514,6 +558,10 @@ stderr, a single summary line to stdout. Example crontab entry:
 
 With Docker Compose, the `backup` service runs it daily (see "Deployment",
 "Backups in compose").
+
+The dump covers the whole database, including the audit trail
+(`document_activity`, see "Verlauf (Audit-Trail)"); `restore` brings it back
+with everything else. The export below does not include it.
 
 The database is dumped first, the files afterwards. Stored files are immutable
 (UUID names), so the only possible drift is a file uploaded in between (an

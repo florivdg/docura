@@ -50,6 +50,7 @@ export function createDbStub() {
   const db = {
     execute: (_query?: unknown) => builder('execute'),
     select: (_fields?: unknown) => builder('select'),
+    selectDistinct: (_fields?: unknown) => builder('select distinct'),
     insert: (_table?: unknown) => builder('insert'),
     update: (_table?: unknown) => builder('update'),
     delete: (_table?: unknown) => builder('delete'),

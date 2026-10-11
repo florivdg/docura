@@ -2,7 +2,7 @@
 import { formatDocumentTimestamp } from '@/lib/document-date'
 import DocumentTagList from './DocumentTagList.vue'
 import { FileText, Image, RotateCcw, Star, Trash2 } from 'lucide-vue-next'
-import { formatFileSize, isImageMime } from '@/lib/format'
+import { formatDateOnly, formatFileSize, isImageMime } from '@/lib/format'
 import type { DocumentRow, ViewType } from '@/composables/useDocumentsFilter'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -24,18 +24,6 @@ const emit = defineEmits<{
   restore: [id: string]
   permanentDelete: [id: string]
 }>()
-
-// Date-only values (YYYY-MM-DD) are rendered in UTC so the day never shifts
-const dateOnlyFormatter = new Intl.DateTimeFormat('de-DE', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-function formatDateOnly(dateStr: string): string {
-  return dateOnlyFormatter.format(new Date(`${dateStr}T00:00:00Z`))
-}
 </script>
 <template>
   <TableRow :data-state="selected ? 'selected' : undefined">

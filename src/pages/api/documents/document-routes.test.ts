@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { createDbStub } from '@/test/db-stub'
+import { snapshotRow } from '@/test/activity-fixture'
 import { detailFixture, reprocessCandidate } from '@/test/document-fixture'
 import { routeCaller } from '@/test/route-call'
 import { tempDir } from '@/test/temp-dir'
@@ -25,15 +26,49 @@ test('returns 400 and 404 without modifying a document', async () => {
   expect((await call(detail.PATCH)).status).toBe(404)
   expect(stub.writes).toEqual([])
 })
-test('PATCH preserves the response shape and writes normalized updates', async () => {
-  stub.results.push([{ id }], [], [detailFixture()], [], [])
+/** Activity entries written by the last insert of the request. */
+function recordedActivities() {
+  return stub.writes.at(-1) as Record<string, unknown>[]
+}
+
+test('PATCH preserves the response shape and records the change', async () => {
+  stub.results.push(
+    [{ id }],
+    [snapshotRow(id, { name: 'Alt.pdf' })],
+    [],
+    [],
+    [snapshotRow(id, { name: 'Rechnung' })],
+    [],
+    [],
+    [detailFixture()],
+    [],
+    [],
+  )
   const response = await call(detail.PATCH, {
     body: { name: ' Rechnung ', folderId: null },
   })
   expect(response.status).toBe(200)
-  expect(stub.writes).toEqual([{ name: 'Rechnung', folderId: null }])
+  expect(stub.writes[0]).toEqual({ name: 'Rechnung', folderId: null })
+  expect(recordedActivities()).toEqual([
+    expect.objectContaining({
+      documentId: id,
+      documentName: 'Rechnung',
+      action: 'updated',
+      actorType: 'user',
+      actorId: 'user-1',
+      actorName: 'Test User',
+      changes: { name: { from: 'Alt.pdf', to: 'Rechnung' } },
+    }),
+  ])
   expect((await response.json()).document.id).toBe(id)
 })
+
+test('PATCH records nothing when the values stay the same', async () => {
+  stub.results.push([{ id }], [snapshotRow(id)], [], [], [snapshotRow(id)])
+  await call(detail.PATCH, { body: { name: 'Rechnung.pdf' } })
+  expect(stub.queries).not.toContain('insert')
+})
+
 test('PATCH rejects malformed JSON and validates missing tags', async () => {
   stub.results.push([{ id }])
   expect((await call(detail.PATCH, { body: null })).status).toBe(400)
@@ -49,9 +84,18 @@ test('DELETE guards permanent deletion and already trashed documents', async () 
   )
   stub.results.push([{ id, trashedAt: new Date() }])
   expect((await call(detail.DELETE)).status).toBe(409)
-  stub.results.push([{ id, trashedAt: null }], [])
+  stub.results.push(
+    [{ id, trashedAt: null }],
+    [snapshotRow(id)],
+    [],
+    [],
+    [snapshotRow(id, { trashedAt: new Date() })],
+  )
   expect((await call(detail.DELETE)).status).toBe(200)
   expect(stub.writes[0]).toHaveProperty('trashedAt')
+  expect(recordedActivities()).toEqual([
+    expect.objectContaining({ action: 'trashed', changes: null }),
+  ])
 })
 test('list and search validate filters and keep distinct empty result shapes', async () => {
   expect((await call(list.GET, { path: '/?view=bad' })).status).toBe(400)
@@ -109,24 +153,68 @@ test('bulk actions validate all records and return a unique document count', asy
   expect(stub.writes[1]).toEqual([{ documentId: id, tagId: id }])
 })
 
+test('bulk trash records one entry per changed document in one batch', async () => {
+  const other = '22222222-2222-4222-8222-222222222222'
+  const trashedAt = new Date()
+  stub.results.push(
+    [{ id }, { id: other }],
+    [snapshotRow(id), snapshotRow(other)],
+    [],
+    [],
+    [snapshotRow(id, { trashedAt }), snapshotRow(other, { trashedAt })],
+    [],
+  )
+  const response = await call(bulk.POST, {
+    body: { ids: [id, other], action: 'trash' },
+  })
+  expect(await response.json()).toEqual({ success: true, count: 2 })
+  expect(stub.queries).toEqual([
+    'select',
+    'select for no key update',
+    'select',
+    'update',
+    'select for no key update',
+    'select',
+    'insert',
+  ])
+  const [first, second] = recordedActivities()
+  expect(first).toMatchObject({ documentId: id, action: 'trashed' })
+  expect(second).toMatchObject({ documentId: other, action: 'trashed' })
+  expect(second.batchId).toBe(first.batchId)
+})
+
 test('emptying the trash validates the action and deletes trashed rows', async () => {
   expect((await call(trash.GET)).status).toBe(200)
   expect((await call(trash.POST, { body: '{' })).status).toBe(400)
   expect((await call(trash.POST, { body: { action: 'x' } })).status).toBe(400)
-  stub.results.push([{ storagePath: 'missing-trash-test.pdf' }])
+  stub.results.push([
+    { name: 'A', storagePath: 'missing-trash-a.pdf' },
+    { name: 'B', storagePath: 'missing-trash-b.pdf' },
+  ])
   const response = await call(trash.POST, { body: { action: 'empty' } })
-  expect(await response.json()).toEqual({ success: true, deleted: 1 })
-  expect(stub.queries).toEqual(['delete'])
+  expect(await response.json()).toEqual({ success: true, deleted: 2 })
+  expect(stub.queries).toEqual(['delete', 'insert'])
+  const [first, second] = recordedActivities()
+  expect(first).toMatchObject({
+    documentId: null,
+    documentName: 'A',
+    action: 'deleted',
+    actorName: 'Test User',
+  })
+  expect(second.batchId).toBe(first.batchId)
 })
 
 test('permanent DELETE removes a trashed document row before its file', async () => {
   stub.results.push(
     [{ id, trashedAt: new Date() }],
-    [{ storagePath: 'missing-permanent-test.pdf' }],
+    [{ name: 'Rechnung.pdf', storagePath: 'missing-permanent-test.pdf' }],
   )
   const response = await call(detail.DELETE, { path: '/?permanent=true' })
   expect(await response.json()).toEqual({ success: true })
-  expect(stub.queries).toEqual(['select', 'delete'])
+  expect(stub.queries).toEqual(['select', 'delete', 'insert'])
+  expect(recordedActivities()).toEqual([
+    expect.objectContaining({ documentId: null, action: 'deleted' }),
+  ])
 })
 
 test('file GET validates the id, the row and the storage path', async () => {
@@ -228,7 +316,8 @@ const LOCK_AND_CANCEL = [[], []]
 
 test('reprocess queues a full job or reuses the pending one', async () => {
   stub.results.push(
-    ...LOCK_AND_CANCEL,
+    [{ id, name: 'Rechnung.pdf' }],
+    [],
     [reprocessCandidate(id)],
     [{ jobId: 'job', id }],
   )
@@ -238,17 +327,28 @@ test('reprocess queues a full job or reuses the pending one', async () => {
     job: { id: 'job', status: 'pending', kind: 'full' },
   })
   expect(stub.writes[1]).toEqual([{ documentId: id, kind: 'full' }])
+  expect(stub.writes[2]).toEqual([
+    expect.objectContaining({
+      documentId: id,
+      documentName: 'Rechnung.pdf',
+      action: 'reprocess_requested',
+      actorName: 'Test User',
+    }),
+  ])
+  stub.reset()
   stub.results.push(...LOCK_AND_CANCEL, [
     reprocessCandidate(id, { pendingJobId: 'old' }),
   ])
   const reused = await call(reprocess.POST)
   expect(reused.status).toBe(200)
   expect((await reused.json()).job.id).toBe('old')
+  expect(stub.queries).not.toContain('insert')
 })
 
-test('reprocess reports the real kind of an upgraded pending job', async () => {
+test('reprocess reports and records an upgraded pending job', async () => {
   stub.results.push(
-    ...LOCK_AND_CANCEL,
+    [{ id, name: 'Rechnung.pdf' }],
+    [],
     [
       reprocessCandidate(id, {
         pendingJobId: 'old',
@@ -262,6 +362,9 @@ test('reprocess reports the real kind of an upgraded pending job', async () => {
   expect(await upgraded.json()).toEqual({
     job: { id: 'old', status: 'pending', kind: 'full' },
   })
+  expect(stub.writes.at(-1)).toEqual([
+    expect.objectContaining({ action: 'reprocess_requested' }),
+  ])
 })
 
 test('reprocess rejects invalid, unknown, trashed and running documents', async () => {

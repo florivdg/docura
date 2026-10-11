@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   desc,
   eq,
   exists,
@@ -12,6 +13,7 @@ import {
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 
 import { db, type Transaction } from '@/db'
+import { documentActivities, recordActivities } from '@/db/activity'
 import { isLatestJob, latestJobPerDoc, viewConditions } from '@/db/queries'
 import { document, processingJob } from '@/db/schema/documents'
 import {
@@ -21,6 +23,7 @@ import {
   type ReprocessCandidate,
   type ReprocessResult,
 } from '@/lib/document-reprocess'
+import type { ActivityActor } from '@/lib/activity'
 import type { JobKind } from '@/lib/processing'
 import type { QueueCountsRow } from '@/lib/system-status'
 
@@ -37,14 +40,36 @@ function jobsOfDocument(status: string) {
 
 /**
  * Row locks on the requested documents serialize concurrent reprocess
- * requests for the same document. Only locks; the job state is read later.
+ * requests for the same document; id order as in `withActivity` and the
+ * correspondent merge keeps lock acquisition consistent. Only locks and
+ * reads the names for the activity entries; the job state is read later.
  */
-async function lockDocuments(ids: string[], tx: Transaction) {
-  await tx
-    .select({ id: document.id })
+function lockDocuments(ids: string[], tx: Transaction) {
+  return tx
+    .select({ id: document.id, name: document.name })
     .from(document)
     .where(inArray(document.id, ids))
+    .orderBy(asc(document.id))
     .for('update')
+}
+
+/**
+ * One `reprocess_requested` entry per new or upgraded job; reused pending jobs
+ * of the same kind record nothing, so a double click adds no entry.
+ */
+async function recordRequests(
+  tx: Transaction,
+  locked: { id: string; name: string }[],
+  requested: QueuedJob[],
+  actor?: ActivityActor,
+) {
+  if (!actor) return
+  const requestedIds = new Set(requested.map((job) => job.id))
+  const documents = locked.filter(({ id }) => requestedIds.has(id))
+  await recordActivities(
+    tx,
+    documentActivities(documents, actor, 'reprocess_requested'),
+  )
 }
 
 /**
@@ -157,17 +182,20 @@ async function insertJobs(
  * running documents are skipped; an already pending job is reused (or turned
  * into a full job for a full request), so a double click does not queue
  * twice. Order matters: lock → cancel retries → read job state → write.
+ * With an `actor`, every new or upgraded job is recorded in the audit trail.
  */
 export function enqueueReprocessing(
   ids: string[],
   kind: JobKind,
+  actor?: ActivityActor,
 ): Promise<ReprocessResult> {
   return db.transaction(async (tx) => {
-    await lockDocuments(ids, tx)
+    const locked = await lockDocuments(ids, tx)
     await cancelScheduledRetries(ids, tx)
     const plan = planReprocessing(ids, await loadCandidates(ids, tx), kind)
     const upgraded = await upgradeJobs(plan.upgrade, tx)
     const created = await insertJobs(plan.insert, kind, tx)
+    await recordRequests(tx, locked, [...upgraded.queued, ...created], actor)
     return {
       queued: [...plan.queued, ...upgraded.queued, ...created],
       skipped: [...plan.skipped, ...upgraded.skipped],

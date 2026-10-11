@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useDocumentResource } from '@/composables/useDocumentResource'
 import { useDocumentActions } from '@/composables/useDocumentActions'
 import { ArrowLeft, FileText, CircleAlert } from 'lucide-vue-next'
@@ -7,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import DocumentPreview from './DocumentPreview.vue'
 import DocumentText from './DocumentText.vue'
 import DocumentProcessingHistory from './DocumentProcessingHistory.vue'
+import DocumentActivityHistory from './DocumentActivityHistory.vue'
 import DocumentMetadata from './DocumentMetadata.vue'
 import DocumentToolbar from './DocumentToolbar.vue'
 import DocumentStateBanner from './DocumentStateBanner.vue'
@@ -14,6 +16,8 @@ const props = defineProps<{
   documentId: string
 }>()
 
+/** Bumped after every save or reload; the history card reloads on change. */
+const activityRevision = ref(0)
 const {
   doc,
   loading,
@@ -22,7 +26,7 @@ const {
   patchDocument,
   hasActiveProcessing,
   refetchDocument,
-} = useDocumentResource(props.documentId)
+} = useDocumentResource(props.documentId, () => activityRevision.value++)
 const {
   deleting,
   restoring,
@@ -131,6 +135,11 @@ const {
         <DocumentMetadata v-model:doc="doc" :patch-document="patchDocument" />
 
         <DocumentProcessingHistory :jobs="doc.processingJobs" />
+
+        <DocumentActivityHistory
+          :document-id="documentId"
+          :revision="activityRevision"
+        />
       </div>
     </div>
   </template>

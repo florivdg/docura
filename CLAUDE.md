@@ -115,6 +115,10 @@ Notes:
 
 - LLM-derived metadata never overwrites manually set values (`IS NULL` guards); the title is the
   exception and is replaced by the LLM suggestion on every full run.
+- The LLM analysis records the fields it applied as one `updated` activity (`KI-Analyse`), restricted to
+  the fields it suggested and recorded in a `finally` (also when a later step fails). Recording is
+  best-effort (logged), since the metadata services write outside a shared transaction; a manual edit of
+  a suggested field during the analysis is attributed to `KI-Analyse`.
 - Jobs have a `kind`: `full` (whole pipeline) or `embedding` (only recomputes the vector from the stored
   text). Reprocessing (`POST /api/documents/[id]/reprocess`, bulk action `reprocess`) and
   `embeddings:reembed` go through `enqueueReprocessing` in `src/db/processing-jobs.ts` (the embedding
@@ -142,9 +146,20 @@ Core entities:
 - **`tag`** - id, name, color, timestamps
 - **`documentTag`** - many-to-many join (documentId, tagId)
 - **`processingJob`** - id, documentId, status, kind (`full`/`embedding`), step, errorMessage, attempts, maxAttempts, nextRetryAt, startedAt, heartbeatAt, completedAt, timestamps
+- **`documentActivity`** - append-only audit trail: id, documentId (SET NULL on delete), documentName snapshot, actorType (`user`/`system`), actorId (SET NULL on user removal), actorName snapshot, action, changes (jsonb, only for `updated`), batchId (one per request/worker call), createdAt
 - Auth tables (user, session, account, passkey) are managed by Better Auth
 
 Soft deletion: `trashedAt` marks trash, `archivedAt` marks archive. Filter both out in list queries.
+
+Audit trail: every mutation of an audited field (name, folder, correspondent, Belegdatum, tags, favorite,
+archive/trash state, upload, permanent deletion, reprocess request for a new or upgraded job) records
+`documentActivity` rows in the same transaction (`src/db/activity.ts`; the LLM analysis is the best-effort
+exception, see Background Worker): `withActivity(tx, ids, actor, mutate)` snapshots before and after and records
+the diff, `recordActivities` inserts explicit entries. Multi-document writes lock their rows in id order
+(snapshots read in chunks of `SNAPSHOT_CHUNK` ascending ids); keep new ones consistent. Routes take the actor from `actorFromLocals(locals)`
+(`src/lib/server/activity-actor.ts`); the worker uses `SYSTEM_ACTORS`. Shared types, the diff and the German
+labels live in `src/lib/activity.ts` / `src/lib/activity-labels.ts`; reads in `src/db/activity-feed.ts`. Scope and
+limits: README, "Verlauf (Audit-Trail)".
 
 ### Document Storage
 
@@ -156,8 +171,8 @@ Soft deletion: `trashedAt` marks trash, `archivedAt` marks archive. Filter both 
   reference to the existing document, the watch folder skips and logs. The column is nullable, so
   un-hashed legacy rows bypass dedup until `bun run backfill:sha256` has run.
 - `UPLOAD_DIR` and storage tunables live in `src/lib/server/storage-config.ts` (`STORAGE_CONFIG`).
-- Permanent deletion (`removeDocumentsPermanently`) removes the row before the file; an interrupted deletion
-  leaves an orphan file, which `storage:check --delete-orphans` reclaims.
+- Permanent deletion (`removeDocumentsPermanently`) removes the row (and records `deleted` activity) before the
+  file; an interrupted deletion leaves an orphan file, which `storage:check --delete-orphans` reclaims.
 - `/api/documents/[id]/file` streams with `Range`/`ETag` support; `/api/documents/export` streams a ZIP
   (`@zip.js/zip.js`, Zip64) of the selected ids or the current list filters.
 

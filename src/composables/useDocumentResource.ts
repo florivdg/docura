@@ -3,7 +3,11 @@ import { apiFetch } from '@/lib/api-fetch'
 import { useProcessingEvents } from './useProcessingEvents'
 import { applyDocumentProcessingEvent } from '@/lib/document-processing-event'
 import type { DocumentData } from '@/lib/document-detail'
-export function useDocumentResource(documentId: string) {
+/** `onChange` runs after every successful save or reload of the document. */
+export function useDocumentResource(
+  documentId: string,
+  onChange: () => void = () => {},
+) {
   const doc = ref<DocumentData | null>(null)
   const loading = ref(true)
   const notFound = ref(false)
@@ -22,6 +26,7 @@ export function useDocumentResource(documentId: string) {
       if (res.ok) {
         const data = await res.json()
         doc.value = data.document
+        onChange()
       } else {
         rollback?.()
       }
@@ -58,6 +63,7 @@ export function useDocumentResource(documentId: string) {
       if (res.ok) {
         const data = await res.json()
         doc.value = data.document
+        onChange()
       }
     } catch {
       // ignore

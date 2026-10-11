@@ -17,6 +17,19 @@ export function formatDate(value: Date | string): string {
   return dateFormatter.format(new Date(value))
 }
 
+// Date-only values (YYYY-MM-DD) are rendered in UTC so the day never shifts
+const dateOnlyFormatter = new Intl.DateTimeFormat('de-DE', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+/** A date-only value such as the Belegdatum (`2026-02-01` → `01.02.2026`). */
+export function formatDateOnly(value: string): string {
+  return dateOnlyFormatter.format(new Date(`${value}T00:00:00Z`))
+}
+
 const dateTimeFormatter = new Intl.DateTimeFormat('de-DE', {
   dateStyle: 'short',
   timeStyle: 'medium',

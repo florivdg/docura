@@ -1,8 +1,10 @@
 import type { APIRoute } from 'astro'
 import { db, type Transaction } from '@/db'
+import { withActivity } from '@/db/activity'
 import { enqueueReprocessing } from '@/db/processing-jobs'
-import { document, documentTag, folder, tag } from '@/db/schema/documents'
-import { and, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { countExistingTags, referenceExists } from '@/db/reference-validation'
+import { document, documentTag } from '@/db/schema/documents'
+import { and, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { parseJsonBody } from '@/lib/api-utils'
 import { withApiErrors } from '@/lib/api-errors'
 import { ApiValidationError } from '@/lib/api-validation-error'
@@ -12,24 +14,21 @@ import {
   type BulkDocumentRequest,
 } from '@/lib/document-bulk'
 import { jsonResponse } from '@/lib/json-response'
+import type { ActivityActor } from '@/lib/activity'
+import { actorFromLocals } from '@/lib/server/activity-actor'
 
 async function validateReferences(request: BulkDocumentRequest): Promise<void> {
-  if (request.action === 'move' && request.folderId) {
-    const rows = await db
-      .select({ id: folder.id })
-      .from(folder)
-      .where(eq(folder.id, request.folderId))
-      .limit(1)
-    if (!rows.length) throw new ApiValidationError('Ordner nicht gefunden', 404)
-  }
-  if (request.action === 'addTags') {
-    const rows = await db
-      .select({ id: tag.id })
-      .from(tag)
-      .where(inArray(tag.id, request.tagIds))
-    if (rows.length !== request.tagIds.length)
-      throw new ApiValidationError('Ein oder mehrere Tags nicht gefunden', 404)
-  }
+  if (
+    request.action === 'move' &&
+    request.folderId &&
+    !(await referenceExists('folder', request.folderId))
+  )
+    throw new ApiValidationError('Ordner nicht gefunden', 404)
+  if (
+    request.action === 'addTags' &&
+    (await countExistingTags(request.tagIds)) !== request.tagIds.length
+  )
+    throw new ApiValidationError('Ein oder mehrere Tags nicht gefunden', 404)
   const docs = await db
     .select({ id: document.id })
     .from(document)
@@ -63,8 +62,11 @@ async function applyBulkAction(
 }
 
 /** Trashed and running documents are skipped and reported, not rejected. */
-async function reprocess(ids: string[]): Promise<Response> {
-  const { queued, skipped } = await enqueueReprocessing(ids, 'full')
+async function reprocess(
+  ids: string[],
+  actor: ActivityActor,
+): Promise<Response> {
+  const { queued, skipped } = await enqueueReprocessing(ids, 'full', actor)
   return jsonResponse({
     success: true,
     count: ids.length,
@@ -73,13 +75,17 @@ async function reprocess(ids: string[]): Promise<Response> {
   })
 }
 
-export const POST: APIRoute = ({ request }) =>
+/** One entry per changed document, all in one batch. */
+export const POST: APIRoute = ({ request, locals }) =>
   withApiErrors(async () => {
     const body = validateBulkDocumentRequest(
       await parseJsonBody<unknown>(request),
     )
     await validateReferences(body)
-    if (body.action === 'reprocess') return reprocess(body.ids)
-    await db.transaction((tx) => applyBulkAction(tx, body))
+    const actor = actorFromLocals(locals)
+    if (body.action === 'reprocess') return reprocess(body.ids, actor)
+    await db.transaction((tx) =>
+      withActivity(tx, body.ids, actor, () => applyBulkAction(tx, body)),
+    )
     return jsonResponse({ success: true, count: body.ids.length })
   })

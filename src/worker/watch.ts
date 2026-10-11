@@ -3,8 +3,10 @@ import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { db } from '@/db'
+import { SYSTEM_ACTORS } from '@/db/activity'
+import { insertUploadedDocument } from '@/db/document-ingest'
 import { findDocumentBySha256 } from '@/db/queries'
-import { document, processingJob } from '@/db/schema/documents'
+import type { document } from '@/db/schema/documents'
 import { isEnoent } from '@/lib/api-utils'
 import { EXT_TO_MIME } from '@/lib/file-validation'
 import { WORKER_CONFIG } from '@/worker/config'
@@ -53,6 +55,15 @@ async function waitForStability(filePath: string): Promise<number> {
   return -1
 }
 
+/** The document row, its processing job and its `uploaded` activity. */
+async function persistDocument(
+  values: typeof document.$inferInsert,
+): Promise<void> {
+  await db.transaction((tx) =>
+    insertUploadedDocument(tx, values, SYSTEM_ACTORS.watch),
+  )
+}
+
 async function ingestFile(filename: string): Promise<void> {
   if (processingFiles.has(filename)) {
     pendingRerun.add(filename)
@@ -66,12 +77,7 @@ async function ingestFile(filename: string): Promise<void> {
       isPending: () => pendingRerun.has(filename),
       waitForStability,
       findDuplicate: findDocumentBySha256,
-      persist: async (values) => {
-        await db.transaction(async (tx) => {
-          const [doc] = await tx.insert(document).values(values).returning()
-          await tx.insert(processingJob).values({ documentId: doc.id })
-        })
-      },
+      persist: persistDocument,
     })
   } catch (err: unknown) {
     if (isEnoent(err)) {

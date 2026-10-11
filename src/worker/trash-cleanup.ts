@@ -1,4 +1,5 @@
 import { db } from '@/db'
+import { SYSTEM_ACTORS } from '@/db/activity'
 import { document } from '@/db/schema/documents'
 import { lt } from 'drizzle-orm'
 import { removeDocumentsPermanently } from '@/lib/server/document-removal'
@@ -11,5 +12,6 @@ export async function cleanupTrash(now = new Date()): Promise<number> {
     db,
     lt(document.trashedAt, cutoff),
     WORKER_CONFIG.uploadDir,
+    SYSTEM_ACTORS.trashCleanup,
   )
 }

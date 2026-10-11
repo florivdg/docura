@@ -1,19 +1,16 @@
 import type { APIRoute } from 'astro'
 import { db } from '@/db'
-import { document, folder, processingJob, tag } from '@/db/schema/documents'
-import { and, count, desc, eq, isNotNull, sql, sum } from 'drizzle-orm'
-import { activeDocumentConditions, latestJobPerDoc } from '@/db/queries'
+import { document, folder, tag } from '@/db/schema/documents'
+import { and, count, desc, eq, isNotNull, sum } from 'drizzle-orm'
+import { activeDocumentConditions } from '@/db/queries'
 
 export const GET: APIRoute = async () => {
-  const latestJob = latestJobPerDoc()
-
   const activeConditions = activeDocumentConditions()
 
   const [
     docStats,
     folderStats,
     tagStats,
-    recentDocs,
     typeBreakdown,
     trashedStats,
     archivedStats,
@@ -37,28 +34,6 @@ export const GET: APIRoute = async () => {
       .select({ tagCount: count() })
       .from(tag)
       .then((r) => r[0]!),
-
-    // Recent 10 documents with latest processing status
-    db
-      .select({
-        id: document.id,
-        name: document.name,
-        mimeType: document.mimeType,
-        fileSize: document.fileSize,
-        createdAt: document.createdAt,
-        folderName: folder.name,
-        processingStatus: processingJob.status,
-      })
-      .from(document)
-      .leftJoin(folder, eq(document.folderId, folder.id))
-      .leftJoin(latestJob, eq(document.id, latestJob.documentId))
-      .leftJoin(
-        processingJob,
-        sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`,
-      )
-      .where(and(...activeConditions))
-      .orderBy(desc(document.createdAt))
-      .limit(10),
 
     // Documents grouped by MIME type (active only)
     db
@@ -102,7 +77,6 @@ export const GET: APIRoute = async () => {
         archivedCount: archivedStats.count,
         favoritesCount: favoritesStats.count,
       },
-      recentDocuments: recentDocs,
       documentsByType: typeBreakdown.map((r) => ({
         mimeType: r.mimeType,
         count: r.count,

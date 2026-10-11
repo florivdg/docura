@@ -64,6 +64,68 @@ test('locks, cancels retries and reads the job state before writing', async () =
   expect(stub.writes[1]).toEqual([{ documentId: 'a', kind: 'embedding' }])
 })
 
+test('records a reprocess request only for newly created jobs', async () => {
+  const actor = { type: 'user', id: 'u1', name: 'Anna' } as const
+  stub.results.push(
+    [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'B' },
+    ],
+    [],
+    [candidate('a'), candidate('b', { pendingJobId: 'job-b' })],
+    [{ jobId: 'job-a', id: 'a' }],
+  )
+  await jobs.enqueueReprocessing(['a', 'b'], 'full', actor)
+  expect(stub.queries.at(-1)).toBe('insert')
+  expect(stub.writes.at(-1)).toEqual([
+    expect.objectContaining({
+      documentId: 'a',
+      documentName: 'A',
+      action: 'reprocess_requested',
+      actorName: 'Anna',
+    }),
+  ])
+})
+
+test('records a reprocess request for an upgraded job', async () => {
+  const actor = { type: 'user', id: 'u1', name: 'Anna' } as const
+  stub.results.push(
+    [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'B' },
+      { id: 'c', name: 'C' },
+    ],
+    [],
+    [
+      candidate('a', { pendingJobId: 'job-a', pendingJobKind: 'embedding' }),
+      candidate('b', { pendingJobId: 'job-b', pendingJobKind: 'embedding' }),
+      candidate('c', { pendingJobId: 'job-c' }),
+    ],
+    [{ jobId: 'job-a', id: 'a' }],
+  )
+  await jobs.enqueueReprocessing(['a', 'b', 'c'], 'full', actor)
+  // The claimed job b and the reused job c record nothing.
+  expect(stub.queries.at(-1)).toBe('insert')
+  expect(stub.writes.at(-1)).toEqual([
+    expect.objectContaining({
+      documentId: 'a',
+      documentName: 'A',
+      action: 'reprocess_requested',
+    }),
+  ])
+})
+
+test('records nothing when a pending job of the same kind is reused', async () => {
+  const actor = { type: 'user', id: 'u1', name: 'Anna' } as const
+  stub.results.push(
+    [{ id: 'a', name: 'A' }],
+    [],
+    [candidate('a', { pendingJobId: 'job-a' })],
+  )
+  await jobs.enqueueReprocessing(['a'], 'full', actor)
+  expect(stub.queries).not.toContain('insert')
+})
+
 test('turns a pending embedding job into a full one unless it was claimed', async () => {
   stub.results.push(
     ...LOCK_AND_CANCEL,
@@ -93,7 +155,9 @@ test('renders table-qualified job subqueries after the lock and the cancellation
     jobs.enqueueReprocessing(['a'], 'full'),
   )
   expect(rest).toEqual([])
-  expect(lock).toMatch(/^select .* from "document" .*for update$/)
+  expect(lock).toMatch(
+    /^select .* from "document" .*order by "document"."id" asc for update$/,
+  )
   expect(cancel).toMatch(/^update "processing_job" set/)
   expect(cancel).toContain('"trashed_at" is null')
   const correlation = '"processing_job"."document_id" = "document"."id"'

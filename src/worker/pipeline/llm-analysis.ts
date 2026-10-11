@@ -1,6 +1,12 @@
+import { randomUUID } from 'node:crypto'
 import { and, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@/db'
+import {
+  loadActivitySnapshots,
+  recordActivities,
+  SYSTEM_ACTORS,
+} from '@/db/activity'
 import { document } from '@/db/schema/documents'
 import { WORKER_CONFIG } from '@/worker/config'
 import { chatWithOllama } from '@/worker/clients/ollama'
@@ -14,6 +20,12 @@ import { applyFolderSuggestion } from '@/worker/services/folder-service'
 import { loadExistingMetadata } from '@/worker/services/metadata-service'
 import { applyTags } from '@/worker/services/tag-service'
 import type { LlmAnalysisResult } from '@/worker/types'
+import {
+  type ActivityChanges,
+  type ActivityField,
+  diffSnapshots,
+  type DocumentSnapshot,
+} from '@/lib/activity'
 import {
   parseLlmJson,
   sanitizeCorrespondent,
@@ -97,8 +109,142 @@ Antworte ausschließlich mit validem JSON in diesem Format:
   }
 }
 
+type AnalyzedDocument = {
+  id: string
+  folderId: string | null
+  correspondentId: string | null
+}
+
+async function applyDocumentDate(id: string, documentDate: string) {
+  // Only fill an empty Belegdatum — never overwrite a manually entered date
+  const updated = await db
+    .update(document)
+    .set({ documentDate })
+    .where(and(eq(document.id, id), isNull(document.documentDate)))
+    .returning({ id: document.id })
+
+  if (updated.length > 0) {
+    console.log(`Belegdatum erkannt für Dokument ${id}: ${documentDate}`)
+  } else {
+    console.log(
+      `Belegdatum für Dokument ${id} bereits gesetzt — Vorschlag "${documentDate}" verworfen`,
+    )
+  }
+}
+
+async function applyAnalysis(
+  doc: AnalyzedDocument,
+  analysis: LlmAnalysisResult,
+) {
+  if (analysis.title) {
+    await db
+      .update(document)
+      .set({ name: analysis.title })
+      .where(eq(document.id, doc.id))
+    console.log(`Titel generiert für Dokument ${doc.id}: "${analysis.title}"`)
+  }
+
+  if (analysis.tags.length > 0) {
+    await applyTags(doc.id, analysis.tags, true)
+  }
+
+  if (analysis.folderSuggestion) {
+    await applyFolderSuggestion(doc, analysis.folderSuggestion)
+  }
+
+  if (analysis.documentDate) {
+    await applyDocumentDate(doc.id, analysis.documentDate)
+  }
+
+  if (analysis.correspondent) {
+    await applyCorrespondent(doc, analysis.correspondent)
+  }
+}
+
+function warnActivity(id: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn(
+    `KI-Analyse: Verlauf für Dokument ${id} nicht gespeichert: ${message}`,
+  )
+}
+
+/**
+ * The audited state, unlocked: the services write outside a shared
+ * transaction, so a lock would only last for this statement.
+ */
+async function loadSnapshot(id: string) {
+  const [snapshot] = await loadActivitySnapshots(db, [id], { lock: false })
+  return snapshot
+}
+
+/** The state before the analysis is applied; null if it cannot be read. */
+async function snapshotBefore(id: string): Promise<DocumentSnapshot | null> {
+  try {
+    const snapshot = await loadSnapshot(id)
+    return snapshot ?? null
+  } catch (error) {
+    warnActivity(id, error)
+    return null
+  }
+}
+
+/** The audited fields the analysis tries to set; only these are recorded. */
+function suggestedFields(analysis: LlmAnalysisResult): Set<ActivityField> {
+  const fields = new Set<ActivityField>()
+  if (analysis.title) fields.add('name')
+  if (analysis.tags.length > 0) fields.add('tags')
+  if (analysis.folderSuggestion) fields.add('folder')
+  if (analysis.documentDate) fields.add('documentDate')
+  if (analysis.correspondent) fields.add('correspondent')
+  return fields
+}
+
+/** The changes restricted to `fields`; concurrent edits of others are not the analysis'. */
+function pickChanges(
+  changes: ActivityChanges,
+  fields: Set<ActivityField>,
+): ActivityChanges {
+  return Object.fromEntries(
+    Object.entries(changes).filter(([field]) =>
+      fields.has(field as ActivityField),
+    ),
+  ) as ActivityChanges
+}
+
+/**
+ * Records the applied fields as one `updated` entry. The services write
+ * outside a shared transaction and the analysis is non-fatal, so a failure
+ * here only logs. Known limit: a manual edit of a suggested field during the
+ * analysis is attributed to KI-Analyse.
+ */
+async function recordAnalysis(
+  id: string,
+  before: DocumentSnapshot | null,
+  fields: Set<ActivityField>,
+) {
+  if (!before) return
+  try {
+    const after = await loadSnapshot(id)
+    if (!after) return
+    const changes = pickChanges(diffSnapshots(before, after), fields)
+    if (Object.keys(changes).length === 0) return
+    await recordActivities(db, [
+      {
+        documentId: id,
+        documentName: after.name,
+        actor: SYSTEM_ACTORS.llm,
+        action: 'updated',
+        changes,
+        batchId: randomUUID(),
+      },
+    ])
+  } catch (error) {
+    warnActivity(id, error)
+  }
+}
+
 export async function runLlmAnalysis(
-  doc: { id: string; folderId: string | null; correspondentId: string | null },
+  doc: AnalyzedDocument,
   textContent: string,
   lease: JobLease,
 ) {
@@ -117,42 +263,16 @@ export async function runLlmAnalysis(
   // aborted the LLM request above is logged as failed analysis and lands here.
   await assertLease(lease)
 
-  if (analysis.title) {
-    await db
-      .update(document)
-      .set({ name: analysis.title })
-      .where(eq(document.id, doc.id))
-    console.log(`Titel generiert für Dokument ${doc.id}: "${analysis.title}"`)
-  }
-
-  if (analysis.tags.length > 0) {
-    await applyTags(doc.id, analysis.tags, true)
-  }
-
-  if (analysis.folderSuggestion) {
-    await applyFolderSuggestion(doc, analysis.folderSuggestion)
-  }
-
-  if (analysis.documentDate) {
-    // Only fill an empty Belegdatum — never overwrite a manually entered date
-    const updated = await db
-      .update(document)
-      .set({ documentDate: analysis.documentDate })
-      .where(and(eq(document.id, doc.id), isNull(document.documentDate)))
-      .returning({ id: document.id })
-
-    if (updated.length > 0) {
-      console.log(
-        `Belegdatum erkannt für Dokument ${doc.id}: ${analysis.documentDate}`,
-      )
-    } else {
-      console.log(
-        `Belegdatum für Dokument ${doc.id} bereits gesetzt — Vorschlag "${analysis.documentDate}" verworfen`,
-      )
-    }
-  }
-
-  if (analysis.correspondent) {
-    await applyCorrespondent(doc, analysis.correspondent)
+  // Nothing to apply means nothing to record: skip both snapshots.
+  const fields = suggestedFields(analysis)
+  if (fields.size === 0) return
+  const before = await snapshotBefore(doc.id)
+  try {
+    await applyAnalysis(doc, analysis)
+  } finally {
+    // Also after a failed step: the retry's snapshot would already contain
+    // the fields written so far. recordAnalysis never throws, so the original
+    // error still fails the job.
+    await recordAnalysis(doc.id, before, fields)
   }
 }

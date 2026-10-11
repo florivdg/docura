@@ -102,3 +102,17 @@ test('keeps listening for events while a failed job has a retry ahead', async ()
     ).toBe(false)
   }
 })
+test('reloads the history after a saved change', async () => {
+  const doc = detailFixture()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(
+    async () => new Response(JSON.stringify({ document: doc })),
+  )
+  const wrapper = page()
+  await flushPromises()
+  const history = () =>
+    wrapper.getComponent({ name: 'DocumentActivityHistory' })
+  expect(history().props()).toEqual({ documentId: doc.id, revision: 0 })
+  wrapper.getComponent({ name: 'DocumentToolbar' }).vm.$emit('favorite')
+  await flushPromises()
+  expect(history().props('revision')).toBe(1)
+})

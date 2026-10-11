@@ -66,7 +66,17 @@ test('imports existing documents, handles filesystem events and shuts down clean
   await startWatcher()
   // Without the mock a real fs.watch races the test (flaky double imports).
   expect(state.event).not.toBeNull()
-  expect(state.persist).toHaveBeenCalledTimes(2)
+  // Document, processing job and its `uploaded` activity.
+  expect(state.persist).toHaveBeenCalledTimes(3)
+  expect(state.persist).toHaveBeenLastCalledWith([
+    expect.objectContaining({
+      documentId: 'doc',
+      documentName: 'test.pdf',
+      action: 'uploaded',
+      actorType: 'system',
+      actorName: 'Watch-Ordner',
+    }),
+  ])
   expect(await readdir(state.config.watchDir)).toEqual([])
   state.event?.('change', null)
   state.event?.('rename', 'unsupported.txt')
