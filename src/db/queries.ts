@@ -55,3 +55,10 @@ export function latestJobPerDoc() {
     .groupBy(processingJob.documentId)
     .as('latest_job')
 }
+
+export type LatestJob = ReturnType<typeof latestJobPerDoc>
+
+/** Join condition from `latestJob` to the full processing_job row. */
+export function isLatestJob(latestJob: LatestJob): SQL {
+  return sql`${processingJob.documentId} = ${latestJob.documentId} AND ${processingJob.createdAt} = ${latestJob.maxCreatedAt}`
+}

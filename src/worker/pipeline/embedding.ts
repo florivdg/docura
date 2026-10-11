@@ -1,5 +1,9 @@
 import { generateEmbedding } from '@/worker/clients/ollama'
-import { updateStep } from '@/worker/pipeline/job-lifecycle'
+import {
+  assertLease,
+  type JobLease,
+  updateStep,
+} from '@/worker/pipeline/job-lifecycle'
 import { chunkText } from '@/worker/utils/text'
 import {
   averageAndNormalizeVectors,
@@ -10,18 +14,19 @@ import {
 export async function generateAndStoreEmbedding(
   documentId: string,
   textContent: string,
-  jobId: string,
+  lease: JobLease,
 ) {
-  await updateStep(jobId, documentId, 'embedding')
+  await updateStep(lease, 'embedding')
 
   const chunks = chunkText(textContent)
   const vectors: number[][] = []
 
   for (const chunk of chunks) {
-    const embeddings = await generateEmbedding(chunk)
+    const embeddings = await generateEmbedding(chunk, lease.signal)
     vectors.push(validateVector(embeddings[0]))
   }
 
   const finalVector = averageAndNormalizeVectors(vectors)
+  await assertLease(lease)
   await storeEmbedding(documentId, finalVector)
 }

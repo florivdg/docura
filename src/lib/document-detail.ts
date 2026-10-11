@@ -1,3 +1,4 @@
+import type { JobKind } from './processing'
 import type { DocumentTag } from '@/composables/useDocumentsFilter'
 export interface DocumentFolder {
   id: string
@@ -12,9 +13,11 @@ export interface DocumentCorrespondent {
 export interface ProcessingJobData {
   id: string
   status: string
+  kind: JobKind
   step: string | null
   errorMessage: string | null
   attempts: number
+  maxAttempts: number
   startedAt: string | null
   completedAt: string | null
   createdAt: string

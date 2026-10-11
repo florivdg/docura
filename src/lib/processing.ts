@@ -1,3 +1,10 @@
+/** 'full' runs the whole pipeline, 'embedding' only recomputes the vector. */
+export type JobKind = 'full' | 'embedding'
+
+/** Badge colours for a healthy/completed state. */
+export const SUCCESS_BADGE_CLASS =
+  'border-green-500/30 bg-green-500/10 text-green-400'
+
 export const statusConfig: Record<
   string,
   {
@@ -11,7 +18,7 @@ export const statusConfig: Record<
   completed: {
     variant: 'outline',
     label: 'Abgeschlossen',
-    class: 'border-green-500/30 bg-green-500/10 text-green-400',
+    class: SUCCESS_BADGE_CLASS,
   },
   failed: { variant: 'destructive', label: 'Fehlgeschlagen' },
 }

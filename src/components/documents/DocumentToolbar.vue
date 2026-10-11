@@ -8,35 +8,44 @@ import {
   Loader2,
   Star,
   Pencil,
+  RefreshCw,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import ReprocessDialog from './ReprocessDialog.vue'
 import type { DocumentData } from '@/lib/document-detail'
 const doc = defineModel<DocumentData>('doc', { required: true })
-const { backUrl, archiving, deleting, patchDocument } = defineProps<{
+const {
+  backUrl,
+  archiving,
+  deleting,
+  processing,
+  reprocessing,
+  patchDocument,
+} = defineProps<{
   backUrl: string
   archiving: boolean
   deleting: boolean
+  /** A job is pending or running; reprocessing would be rejected. */
+  processing: boolean
+  reprocessing: boolean
   patchDocument: (
     payload: Record<string, unknown>,
     rollback?: () => void,
   ) => Promise<void>
 }>()
-const emit = defineEmits<{ favorite: []; archive: []; delete: [] }>()
+const emit = defineEmits<{
+  favorite: []
+  archive: []
+  delete: []
+  reprocess: []
+}>()
 const editingName = ref(false)
 const editNameValue = ref('')
 const editNameInput = ref<InstanceType<typeof Input> | null>(null)
+const deleteOpen = ref(false)
+const reprocessOpen = ref(false)
 
 async function startEditName() {
   editNameValue.value = doc.value.name
@@ -107,6 +116,15 @@ async function saveDocName() {
       </Button>
       <template v-if="!doc.trashedAt">
         <Button
+          variant="outline"
+          :disabled="processing || reprocessing"
+          :title="processing ? 'Verarbeitung läuft bereits' : undefined"
+          @click="reprocessOpen = true"
+        >
+          <RefreshCw class="size-4" :class="{ 'animate-spin': reprocessing }" />
+          Neu verarbeiten
+        </Button>
+        <Button
           v-if="!doc.archivedAt"
           variant="outline"
           :disabled="archiving"
@@ -115,35 +133,29 @@ async function saveDocName() {
           <Archive class="size-4" />
           Archivieren
         </Button>
-        <AlertDialog>
-          <AlertDialogTrigger as-child>
-            <Button variant="destructive" :disabled="deleting">
-              <Loader2 v-if="deleting" class="size-4 animate-spin" />
-              <Trash2 v-else class="size-4" />
-              Löschen
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle
-                >In den Papierkorb verschieben?</AlertDialogTitle
-              >
-              <AlertDialogDescription>
-                Das Dokument „{{ doc.name }}" wird in den Papierkorb verschoben.
-                Sie können es dort wiederherstellen oder endgültig löschen.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-              <AlertDialogAction
-                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                @click="emit('delete')"
-              >
-                In den Papierkorb
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button
+          variant="destructive"
+          :disabled="deleting"
+          @click="deleteOpen = true"
+        >
+          <Loader2 v-if="deleting" class="size-4 animate-spin" />
+          <Trash2 v-else class="size-4" />
+          Löschen
+        </Button>
+        <ReprocessDialog
+          v-model:open="reprocessOpen"
+          :name="doc.name"
+          :pending="reprocessing"
+          @confirm="emit('reprocess')"
+        />
+        <ConfirmDialog
+          v-model:open="deleteOpen"
+          title="In den Papierkorb verschieben?"
+          :description="`Das Dokument „${doc.name}“ wird in den Papierkorb verschoben. Sie können es dort wiederherstellen oder endgültig löschen.`"
+          confirm-label="In den Papierkorb"
+          destructive
+          @confirm="emit('delete')"
+        />
       </template>
     </div>
   </div>

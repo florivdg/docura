@@ -4,13 +4,18 @@ import { db } from '@/db'
 import { document } from '@/db/schema/documents'
 import { WORKER_CONFIG } from '@/worker/config'
 import { chatWithOllama } from '@/worker/clients/ollama'
-import { updateStep } from '@/worker/pipeline/job-lifecycle'
+import {
+  assertLease,
+  type JobLease,
+  updateStep,
+} from '@/worker/pipeline/job-lifecycle'
 import { applyCorrespondent } from '@/worker/services/correspondent-service'
 import { applyFolderSuggestion } from '@/worker/services/folder-service'
 import { loadExistingMetadata } from '@/worker/services/metadata-service'
 import { applyTags } from '@/worker/services/tag-service'
 import type { LlmAnalysisResult } from '@/worker/types'
 import {
+  parseLlmJson,
   sanitizeCorrespondent,
   sanitizeDocumentDate,
   sanitizeFolderSuggestion,
@@ -23,6 +28,7 @@ async function analyzeLlm(
   existingTags: { id: string; name: string }[],
   existingFolders: { id: string; name: string }[],
   existingCorrespondents: { id: string; name: string }[],
+  signal: AbortSignal,
 ): Promise<LlmAnalysisResult> {
   const empty: LlmAnalysisResult = {
     title: null,
@@ -63,11 +69,15 @@ Antworte ausschließlich mit validem JSON in diesem Format:
 {"title": "Der generierte Titel", "tags": ["Tag1", "Tag2"], "folderSuggestion": "Ordnername" oder null, "documentDate": "JJJJ-MM-TT" oder null, "correspondent": "Name" oder null}`
 
   try {
-    const responseText = await chatWithOllama(systemPrompt, truncatedText)
+    const responseText = await chatWithOllama(
+      systemPrompt,
+      truncatedText,
+      signal,
+    )
 
     let parsed: Record<string, unknown>
     try {
-      parsed = JSON.parse(responseText)
+      parsed = parseLlmJson(responseText) as Record<string, unknown>
     } catch {
       console.warn('LLM-Analyse: Antwort ist kein valides JSON')
       return empty
@@ -90,9 +100,9 @@ Antworte ausschließlich mit validem JSON in diesem Format:
 export async function runLlmAnalysis(
   doc: { id: string; folderId: string | null; correspondentId: string | null },
   textContent: string,
-  jobId: string,
+  lease: JobLease,
 ) {
-  await updateStep(jobId, doc.id, 'llm_analysis')
+  await updateStep(lease, 'llm_analysis')
 
   const { existingTags, existingFolders, existingCorrespondents } =
     await loadExistingMetadata()
@@ -101,7 +111,11 @@ export async function runLlmAnalysis(
     existingTags,
     existingFolders,
     existingCorrespondents,
+    lease.signal,
   )
+  // A run that lost its job must not overwrite metadata. A lost lease that
+  // aborted the LLM request above is logged as failed analysis and lands here.
+  await assertLease(lease)
 
   if (analysis.title) {
     await db

@@ -1,20 +1,24 @@
 import { extractPdfOcr, extractPdfText } from '@/worker/clients/ocr'
-import { updateStep } from '@/worker/pipeline/job-lifecycle'
+import { type JobLease, updateStep } from '@/worker/pipeline/job-lifecycle'
 
 export async function extractText(
   doc: { name: string; mimeType: string },
   fileBuffer: Buffer,
-  jobId: string,
-  documentId: string,
+  lease: JobLease,
 ): Promise<string> {
-  await updateStep(jobId, documentId, 'text_extraction')
+  await updateStep(lease, 'text_extraction')
 
-  let text = await extractPdfText(fileBuffer, doc.name, doc.mimeType)
+  let text = await extractPdfText(
+    fileBuffer,
+    doc.name,
+    doc.mimeType,
+    lease.signal,
+  )
 
   // If text extraction yielded very little, try OCR
   if (text.length < 50) {
-    await updateStep(jobId, documentId, 'ocr')
-    text = await extractPdfOcr(fileBuffer, doc.name, doc.mimeType)
+    await updateStep(lease, 'ocr')
+    text = await extractPdfOcr(fileBuffer, doc.name, doc.mimeType, lease.signal)
   }
 
   return text

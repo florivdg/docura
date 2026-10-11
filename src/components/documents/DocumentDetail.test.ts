@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 import DocumentDetail from './DocumentDetail.vue'
-import { detailFixture } from '@/test/document-fixture'
+import { detailFixture, jobFixture } from '@/test/document-fixture'
+import { useProcessingEvents } from '@/composables/useProcessingEvents'
 vi.mock('@/composables/useProcessingEvents', () => ({
   useProcessingEvents: vi.fn(),
 }))
@@ -60,4 +61,44 @@ test('archives and restores through the existing PATCH payloads', async () => {
   expect(JSON.parse(fetch.mock.calls[2][1]!.body as string)).toHaveProperty(
     'archivedAt',
   )
+})
+test('reprocesses through the API and reloads the document', async () => {
+  const doc = detailFixture()
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response(JSON.stringify({ document: doc })))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ job: { id: 'job' } }), { status: 201 }),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ document: doc })))
+  const wrapper = page()
+  await flushPromises()
+  expect(
+    wrapper.getComponent({ name: 'DocumentToolbar' }).props('processing'),
+  ).toBe(false)
+  wrapper.getComponent({ name: 'DocumentToolbar' }).vm.$emit('reprocess')
+  await flushPromises()
+  expect(fetch.mock.calls[1][0]).toBe(`/api/documents/${doc.id}/reprocess`)
+  expect(fetch).toHaveBeenCalledTimes(3)
+})
+test('keeps listening for events while a failed job has a retry ahead', async () => {
+  const listening = () =>
+    vi.mocked(useProcessingEvents).mock.lastCall?.[1]?.enabled
+  for (const [attempts, expected] of [
+    [1, true],
+    [3, false],
+  ] as const) {
+    const doc = detailFixture({
+      processingJobs: [jobFixture({ status: 'failed', attempts })],
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ document: doc })),
+    )
+    const wrapper = page()
+    await flushPromises()
+    expect(listening()).toMatchObject({ value: expected })
+    expect(
+      wrapper.getComponent({ name: 'DocumentToolbar' }).props('processing'),
+    ).toBe(false)
+  }
 })

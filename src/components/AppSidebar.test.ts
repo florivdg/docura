@@ -48,3 +48,9 @@ test('passes the signed-in user to the footer', () => {
     },
   )
 })
+
+test('shows the system status entry to every user', () => {
+  expect(secondaryTitles(sidebar({ name: 'B', role: 'user' }))).toContain(
+    'System',
+  )
+})

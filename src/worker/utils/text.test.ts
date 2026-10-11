@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   chunkText,
+  parseLlmJson,
   sanitizeTitle,
   sanitizeTags,
   sanitizeFolderSuggestion,
@@ -53,5 +54,23 @@ describe('text chunks', () => {
   })
   test('overlaps successive chunks without losing the tail', () => {
     expect(chunkText('abcdefghij', 4, 1)).toEqual(['abcd', 'defg', 'ghij', 'j'])
+  })
+})
+
+describe('parseLlmJson', () => {
+  test('parses plain and code-fenced JSON answers', () => {
+    const expected = { title: 'Rechnung', tags: ['A'] }
+    for (const text of [
+      '{"title":"Rechnung","tags":["A"]}',
+      '```json\n{"title":"Rechnung","tags":["A"]}\n```',
+      '  ```\n{"title":"Rechnung","tags":["A"]}\n```  ',
+      '```JSON {"title":"Rechnung","tags":["A"]} ```',
+    ])
+      expect(parseLlmJson(text)).toEqual(expected)
+  })
+
+  test('still rejects answers that are not JSON', () => {
+    for (const text of ['Hier ist das JSON:', '```json\nkein json\n```'])
+      expect(() => parseLlmJson(text)).toThrow()
   })
 })

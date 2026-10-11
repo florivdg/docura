@@ -56,19 +56,61 @@ A German-language shared document management system. All authenticated users sha
 
 All commands are run from the project root:
 
-| Command                     | Action                                  |
-| :-------------------------- | :-------------------------------------- |
-| `bun --bun run dev`         | Start dev server at `localhost:4321`    |
-| `bun run build`             | Build for production                    |
-| `bun --bun run preview`     | Preview production build                |
-| `bun run db:generate`       | Generate Drizzle migrations from schema |
-| `bun run db:migrate`        | Run database migrations                 |
-| `bun run test`              | Run unit and Vue interaction tests      |
-| `bun run test:coverage`     | Generate Istanbul and LCOV coverage     |
-| `bun run fallow`            | Audit changes against `origin/main`     |
-| `bun run fallow:health`     | Report whole-project health             |
-| `bun run lint --type-aware` | Run OxLint                              |
-| `bun run astro check`       | Run Astro project checks                |
+| Command                      | Action                                         |
+| :--------------------------- | :--------------------------------------------- |
+| `bun --bun run dev`          | Start dev server at `localhost:4321`           |
+| `bun run build`              | Build for production                           |
+| `bun --bun run preview`      | Preview production build                       |
+| `bun run db:generate`        | Generate Drizzle migrations from schema        |
+| `bun run db:migrate`         | Run database migrations                        |
+| `bun run worker`             | Start the background processing worker         |
+| `bun run embeddings:clear`   | Remove all document embeddings                 |
+| `bun run embeddings:reembed` | Queue embedding jobs (`--all`: every document) |
+| `bun run test`               | Run unit and Vue interaction tests             |
+| `bun run test:coverage`      | Generate Istanbul and LCOV coverage            |
+| `bun run fallow`             | Audit changes against `origin/main`            |
+| `bun run fallow:health`      | Report whole-project health                    |
+| `bun run lint --type-aware`  | Run OxLint                                     |
+| `bun run astro check`        | Run Astro project checks                       |
+
+## Processing and system status
+
+The worker (`bun run worker`) extracts text, runs OCR and the LLM analysis and
+stores embeddings. Running jobs renew a heartbeat; when a worker crashes or is
+killed, its jobs are reset after `STALE_JOB_TIMEOUT_MINUTES` (default 10) and
+retried while attempts remain. Documents can be reprocessed from the detail
+page or as a bulk action ("Neu verarbeiten"). The **System** page (`/system`)
+shows whether the worker is alive, the reachability of the database, Redis,
+OCR service and Ollama (including whether the configured models are
+installed), and the queue counts. Queue counts use each document's latest job.
+"Ausstehend" and "In Verarbeitung" include archived documents (e.g. during a
+re-embedding); "Fehlgeschlagen" only counts the regular document list (not
+archived or trashed), so it matches the list filter `/documents?status=failed`.
+
+## Changing the embedding model
+
+Embeddings of different models are not comparable, and the `document.embedding`
+column has a fixed dimension (`EMBEDDING_DIMENSIONS` in
+`src/db/schema/embedding.ts`, 1024 for `mxbai-embed-large`). A populated column
+cannot be altered to another dimension, so the old vectors are removed before
+migrating:
+
+1. Stop the worker.
+2. Remove all embeddings: `bun run embeddings:clear`.
+3. Set `OLLAMA_EMBED_MODEL`. If the new model has a different dimension, change
+   `EMBEDDING_DIMENSIONS` and run `bun run db:generate`. Then run
+   `bun run db:migrate`.
+4. Start the worker (`bun run worker`); it refuses to start if the column does
+   not match `EMBEDDING_DIMENSIONS`. Restart the web app with the new
+   `OLLAMA_EMBED_MODEL` as well, since search embeds queries with it. If
+   `EMBEDDING_DIMENSIONS` changed, rebuild (`bun run build`) and redeploy the
+   web app first, because the dimension is compiled into it.
+5. Queue the re-embedding: `bun run embeddings:reembed`. These jobs reuse the
+   stored text, so scans are not OCRed again. Progress is visible on the
+   System page.
+
+Semantic search returns no results for a document until its new embedding is
+stored; full-text search keeps working throughout.
 
 ## Known Workarounds
 

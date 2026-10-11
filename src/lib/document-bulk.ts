@@ -8,6 +8,7 @@ const ACTIONS = [
   'restore',
   'favorite',
   'unfavorite',
+  'reprocess',
 ] as const
 export type BulkAction = (typeof ACTIONS)[number]
 export interface BulkDocumentRequest {
@@ -63,7 +64,11 @@ export function bulkDocumentUpdates(
       return { trashedAt: now }
     case 'restore':
       return { trashedAt: null }
-    default:
+    case 'favorite':
+    case 'unfavorite':
       return { isFavorite: request.action === 'favorite' }
+    default:
+      // addTags and reprocess write other tables, not document columns.
+      return {}
   }
 }

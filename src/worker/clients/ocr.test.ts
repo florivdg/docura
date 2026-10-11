@@ -32,3 +32,17 @@ test.each(cases)(
     ).rejects.toThrow(`OCR-Service Fehler (${label}): 500`)
   },
 )
+test('a lost job lease cancels the OCR request', async () => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (_url, init) => {
+      init?.signal?.throwIfAborted()
+      return new Response(JSON.stringify({ text: 'Rechnung' }))
+    })
+  const lease = new AbortController()
+  lease.abort(new Error('Lease verloren'))
+  await expect(
+    extractImageText(new Uint8Array(), 'scan.png', 'image/png', lease.signal),
+  ).rejects.toThrow('Lease verloren')
+  expect(fetch).toHaveBeenCalledTimes(1)
+})

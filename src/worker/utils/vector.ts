@@ -60,7 +60,7 @@ export async function storeEmbedding(documentId: string, vector: number[]) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `Embedding konnte nicht gespeichert werden: ${message}. Prüfe "public.document.embedding" auf vector(${WORKER_CONFIG.embeddingDimensions}) und synchronisiere bei Bedarf mit "bun run db:push".`,
+      `Embedding konnte nicht gespeichert werden: ${message}. Prüfe "public.document.embedding" auf vector(${WORKER_CONFIG.embeddingDimensions}); siehe README, Abschnitt "Changing the embedding model".`,
     )
   }
 }

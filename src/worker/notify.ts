@@ -1,15 +1,11 @@
-import { RedisClient } from 'bun'
-
-import { WORKER_CONFIG } from '@/worker/config'
+import { PROCESSING_CHANNEL, sharedRedis } from '@/lib/redis'
 import type { ProcessingNotification } from '@/worker/types'
-
-const redis = new RedisClient(WORKER_CONFIG.redisUrl)
 
 export async function notifyProcessingUpdate(
   payload: ProcessingNotification,
 ): Promise<void> {
   try {
-    await redis.publish('processing_updates', JSON.stringify(payload))
+    await sharedRedis().publish(PROCESSING_CHANNEL, JSON.stringify(payload))
   } catch (error) {
     console.warn(
       'Redis-Benachrichtigung fehlgeschlagen:',

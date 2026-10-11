@@ -24,6 +24,8 @@ bun run db:studio    # Drizzle Studio
 
 # Maintenance
 bun run backfill:sha256                      # Hash existing documents so dedup applies to the old library
+bun run embeddings:clear                     # Drop all embeddings (before migrating to another embedding dimension)
+bun run embeddings:reembed [--all]           # Queue embedding-only jobs for documents without (or --all) vectors
 bun run user:add <email> <password> [name] [--admin]  # Create a user (--admin for the first admin)
 bun run user:role <email> <admin|user>                # Change a user's role
 bun run user:password <email> <new-password>          # Reset a password without SMTP (revokes sessions)
@@ -64,7 +66,7 @@ bun run fallow:health      #   complexity / maintainability
 - `src/db/schema/` - Drizzle schema definitions (auth tables, documents, folders, tags, correspondents, jobs)
 - `src/lib/` - Auth configuration and shared utilities (hashing, dedup, validation, formatting)
 - `src/worker/` - Background processing worker (see below)
-- `scripts/` - CLI scripts (worker entrypoint, user management, sha256 backfill)
+- `scripts/` - CLI scripts (worker entrypoint, user management, sha256 backfill, embedding maintenance)
 - `uploads/` - Document file storage (not in git)
 - `watch/` - Watch folder for filesystem ingest (not in git)
 - `drizzle/` - Never touch this folder - auto-generated Drizzle files
@@ -79,18 +81,34 @@ bun run fallow:health      #   complexity / maintainability
 
 ### Background Worker
 
-Started separately via `bun run worker` (`src/worker/worker-loop.ts`). It runs three concurrent responsibilities:
+Started separately via `bun run worker` (`src/worker/worker-loop.ts`). It runs these concurrent responsibilities:
 
 1. **Job queue** - polls `processing_job`, claims jobs, and runs the pipeline per document:
    text extraction (PDF) or OCR (images) → LLM analysis → embedding. Failures retry with
    backoff up to `max_attempts`.
 2. **Watch folder** - ingests files dropped into `WATCH_DIR`, skipping content duplicates.
 3. **Trash cleanup** - hourly, permanently removes documents trashed longer than `TRASH_RETENTION_DAYS`.
+4. **Stale-job recovery** - running jobs renew `processing_job.heartbeat_at` every 30 s; jobs without a
+   heartbeat for `STALE_JOB_TIMEOUT_MINUTES` (crashed/killed worker) are reset to `failed` and retried
+   if attempts remain. Runs at startup and every minute. Every job-row write of a run (step, lease
+   renewal, completion, failure) is guarded by the claim (`status = 'processing'` and the claimed
+   `attempts`); a run whose job was reset meanwhile aborts its lease signal and stops.
+5. **Worker heartbeat** - refreshes the Redis key `docura:worker:heartbeat` (TTL 30 s) for the `/system` status page.
 
 Notes:
 
-- LLM-derived metadata never overwrites manually set values (`IS NULL` guards).
-- Progress is published to Redis and streamed to the UI via `/api/events/processing` (SSE).
+- LLM-derived metadata never overwrites manually set values (`IS NULL` guards); the title is the
+  exception and is replaced by the LLM suggestion on every full run.
+- Jobs have a `kind`: `full` (whole pipeline) or `embedding` (only recomputes the vector from the stored
+  text). Reprocessing (`POST /api/documents/[id]/reprocess`, bulk action `reprocess`) and
+  `embeddings:reembed` go through `enqueueReprocessing` in `src/db/processing-jobs.ts` (the embedding
+  scripts use `src/db/embeddings.ts`).
+- Changing the embedding model or dimension follows the runbook in README, "Changing the embedding model";
+  the dimension lives in `EMBEDDING_DIMENSIONS` (`src/db/schema/embedding.ts`). Restart (or rebuild and redeploy,
+  if the dimension changed) the web app too: search embeds queries with `OLLAMA_EMBED_MODEL`.
+- Progress is published to Redis and streamed to the UI via `/api/events/processing` (SSE). Redis
+  connections come from `src/lib/redis.ts` (shared by worker and app server); the `/system` probes
+  live in `src/lib/server/system-status.ts`.
 - Tunables live in `src/worker/config.ts`; add new ones there rather than reading `process.env` inline.
 
 ### Component Patterns
@@ -107,7 +125,7 @@ Core entities:
 - **`correspondent`** - id, name, timestamps; case-insensitively unique via a `lower(name)` index
 - **`tag`** - id, name, color, timestamps
 - **`documentTag`** - many-to-many join (documentId, tagId)
-- **`processingJob`** - id, documentId, status, step, errorMessage, attempts, maxAttempts, nextRetryAt, timestamps
+- **`processingJob`** - id, documentId, status, kind (`full`/`embedding`), step, errorMessage, attempts, maxAttempts, nextRetryAt, startedAt, heartbeatAt, completedAt, timestamps
 - Auth tables (user, session, account, passkey) are managed by Better Auth
 
 Soft deletion: `trashedAt` marks trash, `archivedAt` marks archive. Filter both out in list queries.
@@ -142,7 +160,8 @@ Worker-related:
 - `REDIS_URL` - Pub/sub channel for processing progress
 - `WATCH_DIR` / `WATCH_ENABLED` - Filesystem ingest
 - `TRASH_RETENTION_DAYS` - Retention before permanent deletion (default 90)
-- `WORKER_CONCURRENCY` - Parallel job workers (default 2, not in `.env.example`)
+- `WORKER_CONCURRENCY` - Parallel job workers (default 2)
+- `STALE_JOB_TIMEOUT_MINUTES` - Minutes without a job heartbeat before a running job counts as lost and is reset (default 10)
 
 ## Path Alias
 

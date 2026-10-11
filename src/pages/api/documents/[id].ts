@@ -57,9 +57,11 @@ async function loadDocumentRelations(doc: DocumentRow) {
         .select({
           id: processingJob.id,
           status: processingJob.status,
+          kind: processingJob.kind,
           step: processingJob.step,
           errorMessage: processingJob.errorMessage,
           attempts: processingJob.attempts,
+          maxAttempts: processingJob.maxAttempts,
           startedAt: processingJob.startedAt,
           completedAt: processingJob.completedAt,
           createdAt: processingJob.createdAt,

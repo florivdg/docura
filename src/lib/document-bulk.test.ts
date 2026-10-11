@@ -36,3 +36,16 @@ test('bulk update payloads preserve move, restore, trash and favorite semantics'
     isFavorite: false,
   })
 })
+test('accepts reprocessing, which writes no document columns', () => {
+  const request = validateBulkDocumentRequest({
+    ids: [id],
+    action: 'reprocess',
+  })
+  expect(request).toEqual({
+    ids: [id],
+    action: 'reprocess',
+    folderId: null,
+    tagIds: [],
+  })
+  expect(bulkDocumentUpdates(request)).toEqual({})
+})

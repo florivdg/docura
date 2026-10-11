@@ -17,6 +17,24 @@ export function formatDate(value: Date | string): string {
   return dateFormatter.format(new Date(value))
 }
 
+const dateTimeFormatter = new Intl.DateTimeFormat('de-DE', {
+  dateStyle: 'short',
+  timeStyle: 'medium',
+})
+
+/** Date and time with seconds; `–` for a missing or invalid value. */
+export function formatDateTime(
+  value: Date | string | null | undefined,
+): string {
+  const date = new Date(value ?? '')
+  return Number.isNaN(date.getTime()) ? '–' : dateTimeFormatter.format(date)
+}
+
+/** `1 Dokument`, `3 Dokumente`. */
+export function documentCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'Dokument' : 'Dokumente'}`
+}
+
 /**
  * Sanitize a search headline that may contain `<b>` highlight tags.
  * Preserves `<b>` and `</b>` but escapes all other HTML entities.

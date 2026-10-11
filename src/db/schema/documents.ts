@@ -14,6 +14,19 @@ import {
   check,
 } from 'drizzle-orm/pg-core'
 
+import type { JobKind } from '../../lib/processing'
+import { EMBEDDING_DIMENSIONS } from './embedding'
+
+/** Fresh column builders per table; shared instances would leak between tables. */
+function timestamps() {
+  return {
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .$onUpdate(() => new Date())
+      .notNull(),
+  }
+}
+
 export const folder = pgTable(
   'folder',
   {
@@ -22,10 +35,7 @@ export const folder = pgTable(
     parentId: uuid('parent_id').references((): any => folder.id, {
       onDelete: 'cascade',
     }),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at')
-      .$onUpdate(() => new Date())
-      .notNull(),
+    ...timestamps(),
   },
   (table) => [
     index('folder_parentId_idx').on(table.parentId),
@@ -38,10 +48,7 @@ export const correspondent = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at')
-      .$onUpdate(() => new Date())
-      .notNull(),
+    ...timestamps(),
   },
   // Case-insensitive uniqueness: prevents 'Acme' and 'ACME' from coexisting,
   // so concurrent find-or-create races always collapse onto one row.
@@ -67,15 +74,12 @@ export const document = pgTable(
       { onDelete: 'set null' },
     ),
     documentDate: date('document_date', { mode: 'string' }),
-    embedding: vector('embedding', { dimensions: 1024 }),
+    embedding: vector('embedding', { dimensions: EMBEDDING_DIMENSIONS }),
     textContent: text('text_content'),
     isFavorite: boolean('is_favorite').notNull().default(false),
     archivedAt: timestamp('archived_at'),
     trashedAt: timestamp('trashed_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at')
-      .$onUpdate(() => new Date())
-      .notNull(),
+    ...timestamps(),
   },
   (table) => [
     index('document_folderId_idx').on(table.folderId),
@@ -96,10 +100,7 @@ export const tag = pgTable('tag', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull().unique(),
   color: text('color'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at')
-    .$onUpdate(() => new Date())
-    .notNull(),
+  ...timestamps(),
 })
 
 export const documentTag = pgTable(
@@ -126,20 +127,25 @@ export const processingJob = pgTable(
       .notNull()
       .references(() => document.id, { onDelete: 'cascade' }),
     status: text('status').notNull().default('pending'),
+    /** 'full' runs the whole pipeline, 'embedding' only recomputes the vector. */
+    kind: text('kind').$type<JobKind>().notNull().default('full'),
     step: text('step'),
     errorMessage: text('error_message'),
     attempts: integer('attempts').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(3),
     nextRetryAt: timestamp('next_retry_at'),
     startedAt: timestamp('started_at'),
+    /** Renewed by the worker while it runs the job; a stale lease marks a lost job. */
+    heartbeatAt: timestamp('heartbeat_at'),
     completedAt: timestamp('completed_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at')
-      .$onUpdate(() => new Date())
-      .notNull(),
+    ...timestamps(),
   },
   (table) => [
-    index('processingJob_documentId_idx').on(table.documentId),
+    // Serves the latest-job-per-document lookup and the cascade on document.
+    index('processingJob_documentId_createdAt_idx').on(
+      table.documentId,
+      table.createdAt,
+    ),
     index('processingJob_status_idx').on(table.status),
     index('processingJob_status_nextRetryAt_idx').on(
       table.status,
