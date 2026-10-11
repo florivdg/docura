@@ -7,7 +7,6 @@ import {
   FileText,
   FolderOpen,
   HardDrive,
-  HelpCircle,
   LayoutDashboard,
   Search,
   Settings,
@@ -126,11 +125,6 @@ const navSecondary = computed(() => [
     title: 'Einstellungen',
     url: '/account',
     icon: Settings,
-  },
-  {
-    title: 'Hilfe',
-    url: '#',
-    icon: HelpCircle,
   },
 ])
 </script>

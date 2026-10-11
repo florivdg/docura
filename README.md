@@ -83,6 +83,7 @@ All commands are run from the project root:
 | `bun run export`             | Export the library as a ZIP with metadata      |
 | `bun run test`               | Run unit and Vue interaction tests             |
 | `bun run test:coverage`      | Generate Istanbul and LCOV coverage            |
+| `bun run e2e:smoke`          | Smoke test a running instance (see below)      |
 | `bun run fallow`             | Audit changes against `origin/main`            |
 | `bun run fallow:health`      | Report whole-project health                    |
 | `bun run lint --type-aware`  | Run OxLint                                     |
@@ -238,19 +239,63 @@ warning during setup.
 
 ### Updating
 
+Take a backup and note the running version first, then update the whole stack:
+
 ```sh
+docker compose run --rm backup bash /app/scripts/backup-loop.sh --once
+git rev-parse HEAD > .docura-previous-ref   # the version to roll back to
 git pull
 docker compose up -d --build
 docker compose logs migrate   # applied migrations, or "keine Migrationen ausstehend"
+docker compose ps -a          # everything healthy again, migrate exited (0)
 ```
+
+Then run the smoke test (see "Smoke test") or at least the manual checklist.
 
 The `migrate` service runs on every `up` before app and worker start, so updates
 migrate the database automatically. A failed migration keeps app and worker
-stopped (`docker compose logs migrate`). Stopping the worker can take up to 3
-minutes while it finishes running jobs (`stop_grace_period`); jobs still
-unfinished then are reset after `STALE_JOB_TIMEOUT_MINUTES` and retried.
+stopped (`docker compose logs migrate`); see "Rolling back" to return to the
+previous version. Stopping the worker can take up to 3 minutes while it
+finishes running jobs (`stop_grace_period`); jobs still unfinished then are
+reset after `STALE_JOB_TIMEOUT_MINUTES` and retried.
 `docker compose pull --ignore-buildable` refreshes the third-party images
 (Caddy, PostgreSQL, Redis).
+
+App, worker and migrations run from the same image and therefore always have
+the same version. Keep it that way: never run a newer worker against an older
+app (or the other way round), they share the database schema and the job
+format. Outside compose, update and restart app and worker together, after
+running `bun run db:migrate`.
+
+#### Rolling back
+
+Restoring the database alone does not roll back: app, worker and `migrate`
+would still run the new image, and its migrations would run again on the next
+`up`. Check out and rebuild the previous code first, then restore the backup
+taken before the update:
+
+```sh
+docker compose stop app worker
+git checkout $(cat .docura-previous-ref)   # or the previous release tag
+docker compose build                       # the shared app/worker/migrate image from the old code
+docker compose run --rm restore /backups/docura-backup-<ts>            # checks, shows the target
+docker compose run --rm restore /backups/docura-backup-<ts> --yes --force
+docker compose run --rm migrate
+docker compose up -d
+docker compose exec app bun run storage:check
+```
+
+`restore` runs the checked-out (old) scripts. Use `up -d`, not `start`: the
+existing app and worker containers still reference the new image, `up -d`
+recreates them from the rebuilt one. Then run the smoke test. Once the failed
+update is fixed, record the running (rolled-back) version while still on it,
+then return to the branch:
+
+```sh
+git rev-parse HEAD > .docura-previous-ref && git checkout main
+```
+
+Then follow "Updating" from `git pull` on, skipping its `git rev-parse` line.
 
 ### Watch folder
 
@@ -316,6 +361,78 @@ another web server: the HTTP→HTTPS redirect always targets port 443, so set
 `PASSKEY_ORIGIN`) and open the HTTPS URL directly. Use a separate project name
 for such a test stack (`docker compose -p docura-test …`) so it does not share
 volumes with a real installation.
+
+## Smoke test
+
+`bun run e2e:smoke` drives a real Chromium through a running instance, without
+mocks. Run it after every deployment and update. It signs in with password and
+passkey (virtual authenticator), uploads a PDF and an image with random content
+through the upload dialog, waits for processing, checks the PDF's LLM metadata,
+full-text, OCR and semantic search (the PDF has to rank ahead of the run's
+unrelated image), moves the PDF to the trash and restores it. It removes its
+documents and its passkey, also when a step fails or the run is aborted with
+Ctrl+C. Correspondents the LLM created for the test documents are not deleted
+automatically, because they may already be used by other documents; the run
+lists them by name for manual review under Korrespondenten. The steps are listed in
+`e2e/smoke.ts`; the exit code is 0 on success, 1 on the first failed step and
+130/143 after SIGINT/SIGTERM.
+
+Prerequisites: the development dependencies (`bun install`) and Chromium for
+Playwright, once per machine:
+
+```sh
+bunx playwright install chromium
+```
+
+| Variable                    | Purpose                                                                                                                |
+| :-------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| `SMOKE_BASE_URL`            | Required. URL of the instance, e.g. `https://docura.lan`                                                               |
+| `SMOKE_EMAIL`               | Required. E-mail of an existing user                                                                                   |
+| `SMOKE_PASSWORD`            | Required. That user's password                                                                                         |
+| `SMOKE_SPKI`                | Accept Caddy's private CA (see below)                                                                                  |
+| `SMOKE_IGNORE_HTTPS_ERRORS` | `1` accepts any certificate; fallback without `SMOKE_SPKI`. Mutually exclusive with it: the run aborts if both are set |
+| `SMOKE_TIMEOUT_SECONDS`     | Max. wait for processing (default `300`)                                                                               |
+
+If Playwright's Chromium already trusts the Docura root CA (on macOS via the
+system keychain, see "Trusting the certificate"), no certificate setting is
+needed. Otherwise prefer `SMOKE_SPKI` over `SMOKE_IGNORE_HTTPS_ERRORS`: Chromium
+then accepts the real certificate chain issued by Caddy's CA, but no other
+invalid certificate. It is the base64-encoded SHA-256 hash of the public key
+(SPKI) of Caddy's intermediate certificate:
+
+```sh
+docker compose cp caddy:/data/caddy/pki/authorities/local/intermediate.crt ./caddy-intermediate.crt
+export SMOKE_SPKI=$(openssl x509 -in caddy-intermediate.crt -pubkey -noout \
+  | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64)
+```
+
+The intermediate certificate renews itself weekly; compute the value again when
+the test fails with a certificate error. Then run:
+
+```sh
+SMOKE_BASE_URL=https://docura.lan SMOKE_EMAIL=admin@example.com \
+  SMOKE_PASSWORD='…' bun run e2e:smoke
+```
+
+The test needs the full stack: worker, OCR service and Ollama (LLM and
+embeddings). It signs in as the given user and briefly adds a passkey to that
+account; use a dedicated test user if you prefer.
+
+### Manual checklist
+
+The documented minimum after each deployment or update when the smoke test
+cannot run:
+
+- [ ] Sign in with e-mail and password; the browser shows a valid HTTPS
+      connection.
+- [ ] Add a passkey under Einstellungen (`/account`), sign out, sign in with
+      the passkey.
+- [ ] Upload a PDF and a photo or scan through the upload dialog.
+- [ ] Both reach "Abgeschlossen" in the document list.
+- [ ] Full-text search finds a word from the PDF and a word from the image;
+      semantic search with a paraphrase finds the PDF.
+- [ ] Move a document to the trash, find it under Papierkorb, restore it.
+- [ ] Delete the test documents permanently and remove the test passkey.
 
 ## Processing and system status
 

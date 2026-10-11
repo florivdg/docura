@@ -44,3 +44,6 @@ coverage/
 # local browser checks and CI report output
 .playwright-cli/
 quality-reports/
+
+# previous version for rolling back an update (README, "Updating")
+.docura-previous-ref

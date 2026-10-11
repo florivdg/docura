@@ -20,9 +20,13 @@ export default defineConfig({
     coverage: {
       provider: 'istanbul',
       reporter: ['text', 'json', 'lcov'],
-      include: ['src/**/*.ts', 'src/**/*.vue'],
+      include: ['src/**/*.ts', 'src/**/*.vue', 'e2e/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',
+        'e2e/**/*.test.ts',
+        // Browser-driven smoke test against a live instance (bun run e2e:smoke)
+        'e2e/smoke.ts',
+        'e2e/browser.ts',
         'src/components/ui/**',
         'src/db/schema/**',
         'src/middleware.ts',

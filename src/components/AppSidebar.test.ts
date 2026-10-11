@@ -54,3 +54,11 @@ test('shows the system status entry to every user', () => {
     'System',
   )
 })
+
+test('links every secondary entry to a real page', () => {
+  const items = sidebar({ name: 'A', role: 'admin' })
+    .getComponent({ name: 'NavSecondary' })
+    .props('items') as { title: string; url: string }[]
+  expect(items.map((item) => item.title)).not.toContain('Hilfe')
+  for (const item of items) expect(item.url).toMatch(/^\/\w/)
+})

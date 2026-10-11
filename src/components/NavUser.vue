@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Bell, EllipsisVertical, LogOut, UserCircle } from 'lucide-vue-next'
+import { EllipsisVertical, LogOut, UserCircle } from 'lucide-vue-next'
 import { authClient } from '@/lib/auth-client'
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import NavUserIdentity, {
+  type NavUserData,
+} from '@/components/NavUserIdentity.vue'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,25 +21,11 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 
-interface User {
-  name: string
-  email: string
-  avatar: string
-}
-
-const props = defineProps<{
-  user: User
+defineProps<{
+  user: NavUserData
 }>()
 
 const { isMobile } = useSidebar()
-
-const initials = computed(() => {
-  const words = props.user.name.trim().split(/\s+/)
-  return words
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('')
-})
 
 async function handleLogout() {
   await authClient.signOut()
@@ -55,18 +42,7 @@ async function handleLogout() {
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
-            <Avatar class="h-8 w-8 rounded-lg grayscale">
-              <AvatarImage :src="user.avatar" :alt="user.name" />
-              <AvatarFallback class="rounded-lg">
-                {{ initials }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="grid flex-1 text-left text-sm leading-tight">
-              <span class="truncate font-medium">{{ user.name }}</span>
-              <span class="text-muted-foreground truncate text-xs">
-                {{ user.email }}
-              </span>
-            </div>
+            <NavUserIdentity :user="user" grayscale />
             <EllipsisVertical class="ml-auto size-4" />
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -78,18 +54,7 @@ async function handleLogout() {
         >
           <DropdownMenuLabel class="p-0 font-normal">
             <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-              <Avatar class="h-8 w-8 rounded-lg">
-                <AvatarImage :src="user.avatar" :alt="user.name" />
-                <AvatarFallback class="rounded-lg">
-                  {{ initials }}
-                </AvatarFallback>
-              </Avatar>
-              <div class="grid flex-1 text-left text-sm leading-tight">
-                <span class="truncate font-medium">{{ user.name }}</span>
-                <span class="text-muted-foreground truncate text-xs">
-                  {{ user.email }}
-                </span>
-              </div>
+              <NavUserIdentity :user="user" />
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -97,10 +62,6 @@ async function handleLogout() {
             <DropdownMenuItem as="a" href="/account">
               <UserCircle />
               Konto
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Bell />
-              Benachrichtigungen
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
