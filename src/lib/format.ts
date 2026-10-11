@@ -6,6 +6,17 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
+const dateFormatter = new Intl.DateTimeFormat('de-DE', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+})
+
+/** Date without time, e.g. `01.02.2026`. */
+export function formatDate(value: Date | string): string {
+  return dateFormatter.format(new Date(value))
+}
+
 /**
  * Sanitize a search headline that may contain `<b>` highlight tags.
  * Preserves `<b>` and `</b>` but escapes all other HTML entities.

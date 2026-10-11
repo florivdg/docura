@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer'
+import nodemailer, { type Transporter } from 'nodemailer'
 
 function escapeHtml(str: string): string {
   return str
@@ -9,24 +9,61 @@ function escapeHtml(str: string): string {
     .replaceAll("'", '&#39;')
 }
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-})
+/** Password reset by e-mail is only offered when an SMTP host is configured. */
+export function isSmtpConfigured(): boolean {
+  return Boolean(process.env.SMTP_HOST?.trim())
+}
 
-export async function sendPasswordResetEmail(
-  user: { email: string; name: string },
-  url: string,
-) {
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM,
-    to: user.email,
-    subject: 'Passwort zurücksetzen – Docura',
-    html: `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+let transporter: Transporter | undefined
+
+function getTransporter(): Transporter {
+  transporter ??= nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  })
+  return transporter
+}
+
+interface MailRecipient {
+  email: string
+  name: string
+}
+
+/**
+ * Better Auth's `sendResetPassword` callback, only registered when SMTP is
+ * configured. It never throws: the reset endpoint answers uniformly either
+ * way, and a failing SMTP server is only logged.
+ */
+export async function sendPasswordResetEmail(user: MailRecipient, url: string) {
+  try {
+    await getTransporter().sendMail({
+      from: process.env.SMTP_FROM,
+      to: user.email,
+      subject: 'Passwort zurücksetzen – Docura',
+      html: passwordResetHtml(user, url),
+    })
+  } catch (error) {
+    console.error('Passwort-Reset-E-Mail konnte nicht gesendet werden:', error)
+  }
+}
+
+function passwordResetHtml(user: MailRecipient, url: string): string {
+  const values: Record<string, string> = {
+    name: escapeHtml(user.name),
+    url: escapeHtml(url),
+    year: String(new Date().getFullYear()),
+  }
+  return PASSWORD_RESET_TEMPLATE.replaceAll(
+    /\{\{(\w+)\}\}/g,
+    (_match, key: string) => values[key] ?? '',
+  )
+}
+
+const PASSWORD_RESET_TEMPLATE = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="de">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
@@ -67,21 +104,21 @@ export async function sendPasswordResetEmail(
                 <!-- Greeting + explanation -->
                 <tr>
                   <td style="padding:0 0 24px 0;font-size:15px;line-height:24px;color:#3f3f46;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-                    Hallo ${escapeHtml(user.name)},<br /><br />
+                    Hallo {{name}},<br /><br />
                     du hast eine Anfrage zum Zurücksetzen deines Passworts gestellt. Klicke auf den folgenden Button, um ein neues Passwort zu vergeben:
                   </td>
                 </tr>
                 <!-- CTA Button -->
                 <tr>
                   <td align="center" style="padding:0 0 24px 0;">
-                    <a href="${escapeHtml(url)}" target="_blank" style="display:inline-block;background-color:#6d28d9;color:#ffffff;font-size:15px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-decoration:none;padding:12px 32px;border-radius:6px;">Passwort zurücksetzen</a>
+                    <a href="{{url}}" target="_blank" style="display:inline-block;background-color:#6d28d9;color:#ffffff;font-size:15px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-decoration:none;padding:12px 32px;border-radius:6px;">Passwort zurücksetzen</a>
                   </td>
                 </tr>
                 <!-- Fallback URL -->
                 <tr>
                   <td style="padding:0 0 24px 0;font-size:13px;line-height:20px;color:#71717a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                     Falls der Button nicht funktioniert, kopiere den folgenden Link in deinen Browser:<br />
-                    <a href="${escapeHtml(url)}" style="color:#6d28d9;text-decoration:underline;word-break:break-all;">${escapeHtml(url)}</a>
+                    <a href="{{url}}" style="color:#6d28d9;text-decoration:underline;word-break:break-all;">{{url}}</a>
                   </td>
                 </tr>
                 <!-- Ignore notice -->
@@ -96,7 +133,7 @@ export async function sendPasswordResetEmail(
           <!-- Footer -->
           <tr>
             <td align="center" style="padding:24px 0 0 0;font-size:12px;line-height:18px;color:#a1a1aa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-              &copy; ${new Date().getFullYear()} Docura. Alle Rechte vorbehalten.
+              &copy; {{year}} Docura. Alle Rechte vorbehalten.
             </td>
           </tr>
         </table>
@@ -105,6 +142,4 @@ export async function sendPasswordResetEmail(
     </tr>
   </table>
 </body>
-</html>`,
-  })
-}
+</html>`

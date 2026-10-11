@@ -24,7 +24,9 @@ bun run db:studio    # Drizzle Studio
 
 # Maintenance
 bun run backfill:sha256                      # Hash existing documents so dedup applies to the old library
-bun run user:add <email> <password> [name]   # Create a user
+bun run user:add <email> <password> [name] [--admin]  # Create a user (--admin for the first admin)
+bun run user:role <email> <admin|user>                # Change a user's role
+bun run user:password <email> <new-password>          # Reset a password without SMTP (revokes sessions)
 
 # Code Quality
 bun run lint --type-aware  # Run OxLint

@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 import { Fingerprint } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import { authClient } from '@/lib/auth-client'
+import { useAuthRequest } from '@/composables/useAuthRequest'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -18,31 +19,24 @@ import { Separator } from '@/components/ui/separator'
 
 const props = defineProps<{
   class?: HTMLAttributes['class']
+  /** "Passwort vergessen?" needs SMTP; the page passes `isSmtpConfigured()`. */
+  passwordResetEnabled?: boolean
 }>()
 
 const email = ref('')
 const password = ref('')
-const error = ref('')
-const loading = ref(false)
+const { pending: loading, error, run } = useAuthRequest()
 
 async function handleSubmit() {
-  error.value = ''
-  loading.value = true
-  try {
-    const { error: signInError } = await authClient.signIn.email({
-      email: email.value,
-      password: password.value,
-    })
-    if (signInError) {
-      error.value = signInError.message ?? 'Anmeldung fehlgeschlagen.'
-      return
-    }
-    window.location.href = '/'
-  } catch {
-    error.value = 'Anmeldung fehlgeschlagen.'
-  } finally {
-    loading.value = false
-  }
+  const signedIn = await run(
+    () =>
+      authClient.signIn.email({
+        email: email.value,
+        password: password.value,
+      }),
+    'Anmeldung fehlgeschlagen.',
+  )
+  if (signedIn) window.location.href = '/'
 }
 
 onMounted(() => {
@@ -55,20 +49,11 @@ onMounted(() => {
 })
 
 async function handlePasskeySignIn() {
-  error.value = ''
-  loading.value = true
-  try {
-    const { error: passkeyError } = await authClient.signIn.passkey()
-    if (passkeyError) {
-      error.value = passkeyError.message ?? 'Passkey-Anmeldung fehlgeschlagen.'
-      return
-    }
-    window.location.href = '/'
-  } catch {
-    error.value = 'Passkey-Anmeldung fehlgeschlagen.'
-  } finally {
-    loading.value = false
-  }
+  const signedIn = await run(
+    () => authClient.signIn.passkey(),
+    'Passkey-Anmeldung fehlgeschlagen.',
+  )
+  if (signedIn) window.location.href = '/'
 }
 </script>
 
@@ -100,6 +85,7 @@ async function handlePasskeySignIn() {
               <div class="flex items-center">
                 <FieldLabel for="password"> Passwort </FieldLabel>
                 <a
+                  v-if="props.passwordResetEnabled"
                   href="/reset-password"
                   class="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                 >

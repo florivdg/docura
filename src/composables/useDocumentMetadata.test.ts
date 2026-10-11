@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { defineComponent, ref, type Ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { useDocumentFields } from './useDocumentFields'
@@ -6,15 +6,13 @@ import { useDocumentTags } from './useDocumentTags'
 import { useDocumentCorrespondent } from './useDocumentCorrespondent'
 import { detailFixture } from '@/test/document-fixture'
 import type { DocumentData, PatchDocument } from '@/lib/document-detail'
-const wrappers: ReturnType<typeof mount>[] = []
-afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()))
 function setup<T>(
   hook: (doc: Ref<DocumentData>, patch: PatchDocument) => T,
   patch: PatchDocument = async () => {},
 ) {
   const doc = ref(detailFixture())
   let result: T
-  const wrapper = mount(
+  mount(
     defineComponent({
       setup() {
         result = hook(doc, patch)
@@ -22,7 +20,6 @@ function setup<T>(
       },
     }),
   )
-  wrappers.push(wrapper)
   return { doc, state: result! }
 }
 function optionsFetch() {

@@ -16,6 +16,8 @@
     "worker": "bun run scripts/worker.ts",
     "backfill:sha256": "bun run scripts/backfill-sha256.ts",
     "user:add": "bun run scripts/add-user.ts",
+    "user:role": "bun run scripts/set-user-role.ts",
+    "user:password": "bun run scripts/set-user-password.ts",
     "fallow": "fallow audit --base origin/main",
     "fallow:dead": "fallow dead-code",
     "fallow:dupes": "fallow dupes",
