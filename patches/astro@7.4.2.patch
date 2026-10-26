@@ -1,0 +1,38 @@
+diff --git a/dist/core/app/node.js b/dist/core/app/node.js
+index df6321eb6fb4917f9bdc57531159cd36b02e9ba1..557ff1b98e3f5418358ce97d4dd122fd35eb9e5c 100644
+--- a/dist/core/app/node.js
++++ b/dist/core/app/node.js
+@@ -203,11 +203,32 @@ export async function writeResponse(source, destination) {
+ 				console.error("There was an uncaught error in the middle of the stream while rendering %s.", destination.req.url, err);
+ 			});
+ 		});
++		if (destination.destroyed) {
++			reader.cancel().catch(() => {});
++			return destination.end();
++		}
+ 		let result = await reader.read();
+ 		while (!result.done) {
+-			destination.write(result.value);
++			if (destination.destroyed) break;
++			if (!destination.write(result.value)) {
++				if (!destination.destroyed) {
++					await new Promise((resolve) => {
++						const done = () => {
++							destination.off("drain", done);
++							destination.off("close", done);
++							destination.off("error", done);
++							resolve();
++						};
++						destination.on("drain", done);
++						destination.on("close", done);
++						destination.on("error", done);
++					});
++				}
++				if (destination.destroyed) break;
++			}
+ 			result = await reader.read();
+ 		}
++		if (destination.destroyed) reader.cancel().catch(() => {});
+ 		destination.end();
+ 	} catch (err) {
+ 		destination.write("Internal server error", () => {
