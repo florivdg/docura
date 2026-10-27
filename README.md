@@ -245,7 +245,8 @@ Take a backup and note the running version first, then update the whole stack:
 docker compose run --rm backup bash /app/scripts/backup-loop.sh --once
 git rev-parse HEAD > .docura-previous-ref   # the version to roll back to
 git pull
-docker compose up -d --build
+docker compose build --pull   # --pull fetches the newest Bun 1.x base image
+docker compose up -d
 docker compose logs migrate   # applied migrations, or "keine Migrationen ausstehend"
 docker compose ps -a          # everything healthy again, migrate exited (0)
 ```
