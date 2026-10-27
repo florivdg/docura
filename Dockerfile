@@ -2,8 +2,10 @@
 # Docura production image: web app (default command), worker and migrator.
 # Debian slim (glibc) because rolldown and oxlint ship glibc-native binaries;
 # not distroless, `docker compose exec app bun run user:add …` needs a shell.
+# Floating `1` tag: always the newest Bun 1.x (no automated dependency updates
+# yet). Build with --pull, a cached base image does not update on its own.
 
-FROM oven/bun:1.4.3-slim AS deps
+FROM oven/bun:1-slim AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 # bun install applies patches/ (patchedDependencies) and fails without it.
@@ -18,7 +20,7 @@ COPY public ./public
 COPY src ./src
 RUN bun run build
 
-FROM oven/bun:1.4.3-slim AS runtime
+FROM oven/bun:1-slim AS runtime
 WORKDIR /app
 # The Node adapter listens on localhost unless HOST is set.
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4321
